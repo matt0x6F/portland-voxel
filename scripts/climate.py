@@ -1,7 +1,7 @@
-"""What Warsaw's weather is like on each day of the year, so the viewer shows a typical day and offers only what can
+"""What East Portland's weather is like on each day of the year, so the viewer shows a typical day and offers only what can
 happen then (no snow in June).
 
-Open-Meteo's historical archive (ERA5 reanalysis, 1995-2024) for central Warsaw, over a window of ±10 days around each
+Open-Meteo's historical archive (ERA5 reanalysis, 1995-2024) for East Portland (SE 122nd & Foster), over a window of ±10 days around each
 day of the year:
   clear / cloudy / rain / snow: the share of days of each kind (snow: >= 1 cm fresh; rain: >= 2 mm; cloudy: mean
          cloud >= 75%; clear: the rest), summing to 1
@@ -21,8 +21,8 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent))
 from aoi import RAW  # noqa: E402
 
-API = "https://archive-api.open-meteo.com/v1/archive?latitude=52.23&longitude=21.01&start_date=1995-01-01&end_date=2024-12-31&timezone=Europe%2FWarsaw"
-DAILY = Path(RAW) / "climate" / "warsaw_daily2.json"
+API = "https://archive-api.open-meteo.com/v1/archive?latitude=45.48&longitude=-122.53&start_date=1995-01-01&end_date=2024-12-31&timezone=America%2FLos_Angeles"
+DAILY = Path(RAW) / "climate" / "portland_daily.json"
 OUT = Path(__file__).parent.parent / "web/public/data/climate.json"
 WINDOW = 10
 

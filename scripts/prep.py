@@ -1,4 +1,4 @@
-"""Mosaic GUGiK 2025 DSM (0.5 m), DTM (1 m) and orthophoto, then resample onto the rotated AOI grid.
+"""Mosaic the lidar DSM (0.5 m), DTM (1 m) and orthophoto (fetch_lidar.py, fetch_ortho.py), then resample onto the rotated AOI grid.
 
 Outputs (row 0 = grid row 0): dsm at 0.5 m, dtm at 1 m, orto at 0.2 m.
 """
@@ -12,7 +12,7 @@ from rasterio.merge import merge
 from rasterio.windows import from_bounds
 from scipy import ndimage
 
-from aoi import D, RAW, W, to_world, world_bounds
+from aoi import D, NAME, RAW, W, to_world, world_bounds
 
 MINX, MINY, MAXX, MAXY = (round(v) for v in world_bounds(margin=10))
 BOUNDS = (MINX, MINY, MAXX, MAXY)
@@ -31,7 +31,7 @@ def mosaic(pattern, res, nodata=-9999):
 
 
 def mosaic_rgb(pattern, res):
-    # sheets carry slightly different WKT for EPSG:2180, so paste windows manually
+    # paste each tile's window by its bounds (tiles may differ in WKT and pixel grid)
     out = np.zeros((round((MAXY - MINY) / res), round((MAXX - MINX) / res), 3), np.uint8)
     for p in sorted(glob.glob(f"{RAW}/{pattern}")):
         with rasterio.open(p) as r:
@@ -68,14 +68,14 @@ def resample(src, src_res, out_res, order, band=1024, origin=None):
     return out
 
 
-_m, _t = mosaic("dsm_*.asc", 0.5)
+_m, _t = mosaic(f"dsm_{NAME}.tif", 0.5)
 dsm = resample(_m[0].astype(np.float32), 0.5, 0.5, order=0, origin=(_t.c, _t.f))  # nearest keeps spires
-_m, _t = mosaic("dtm_*.asc", 1.0)
+_m, _t = mosaic(f"dtm_{NAME}.tif", 1.0)
 dtm = resample(_m[0].astype(np.float32), 1.0, 1.0, order=1, origin=(_t.c, _t.f))
 del _m
 for n, a in (("dsm", dsm), ("dtm", dtm)):
     print(n, a.shape, float(a[a > -1000].min()), float(a.max()), int((a < -1000).sum()), "nodata")
-orto = resample(mosaic_rgb("orto_*.tif", 0.2), 0.2, 0.2, order=1)
+orto = resample(mosaic_rgb(f"orto_{NAME}_*.tif", 0.2), 0.2, 0.2, order=1)
 print("orto", orto.shape, orto.reshape(-1, 3).mean(0), int((orto.sum(-1) == 0).sum()), "empty px")
 np.savez_compressed("data/prep.npz", dsm=dsm, dtm=dtm, orto=orto)
 from PIL import Image

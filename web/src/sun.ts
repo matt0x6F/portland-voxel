@@ -1,12 +1,15 @@
-const RAD = Math.PI / 180, LAT = 52.23 * RAD, LON = 21.01;
+// East Portland (SE 122nd & Foster); longitude east-positive
+const RAD = Math.PI / 180, LAT = 45.48 * RAD, LON = -122.53;
 
-const lastSunday = (year: number, month: number) => { const d = new Date(Date.UTC(year, month + 1, 0)); return d.getUTCDate() - d.getUTCDay(); };
+// the n-th Sunday (1-based) of a month, as a day of the month
+const nthSunday = (year: number, month: number, n: number) => 1 + (7 - new Date(Date.UTC(year, month, 1)).getUTCDay()) % 7 + 7 * (n - 1);
 export const dayOfYear = (d: Date) => Math.round((Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) - Date.UTC(d.getFullYear(), 0, 0)) / 864e5);
 export const dateOf = (day: number, year = new Date().getFullYear()) => new Date(year, 0, day);
 
+// US Pacific time: PDT (UTC-7) from the second Sunday of March to the first Sunday of November, else PST (UTC-8)
 export function utcOffset(day: number, year = new Date().getFullYear()) {
-  const start = dayOfYear(new Date(year, 2, lastSunday(year, 2))), end = dayOfYear(new Date(year, 9, lastSunday(year, 9)));
-  return day >= start && day < end ? 2 : 1;
+  const start = dayOfYear(new Date(year, 2, nthSunday(year, 2, 2))), end = dayOfYear(new Date(year, 10, nthSunday(year, 10, 1)));
+  return day >= start && day < end ? -7 : -8;
 }
 
 // NOAA low-precision declination and equation of time

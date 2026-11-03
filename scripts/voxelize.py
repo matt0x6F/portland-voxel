@@ -22,9 +22,17 @@ from shapely.geometry import LineString, Point
 from shapely.ops import substring
 from shapely.strtree import STRtree
 
-from aoi import CX, CY, D, THETA, W
+from aoi import CX, CY, D, EPSG, THETA, W
 from osm import OSM
-import landmarks
+
+# CITY=warsaw keeps the upstream curated landmarks; Portland swaps in its own module under the same name, so
+# labels.py and patch.py (which `import landmarks`) see it too
+CITY = os.environ.get("CITY", "portland")
+if CITY == "portland":
+    import landmarks_portland as landmarks
+    sys.modules["landmarks"] = landmarks
+else:
+    import landmarks
 
 OUT = Path("web/public/data")
 DBG = Path("data/debug")
@@ -445,9 +453,11 @@ for oid, t, line in osm.lines:
         if solid:
             lane_lines.append(ln)
         else:
-            L = ln.length
-            for s in np.arange(1.0, L - 1, 9.0):
-                lane_lines.append(substring(ln, s, min(s + 3, L)))
+            # the offset of a tight curve can fold into a MultiLineString (first seen in East Portland): dash each part
+            for part in getattr(ln, "geoms", [ln]):
+                L = part.length
+                for s in np.arange(1.0, L - 1, 9.0):
+                    lane_lines.append(substring(part, s, min(s + 3, L)))
 lm = np.zeros((D, W), np.uint16)
 burn(lm, [(l, 1) for l in lane_lines], all_touched=False)
 lm_mask = (lm > 0) & np.isin(gcol, [C["asphalt"]])
@@ -509,7 +519,11 @@ for p in parts:
     p["render"] = True
 render = [f for f in feats if f["render"]]
 
-pkin = next(f for f in feats if f["tags"].get("name") == "Pałac Kultury i Nauki")
+pkin = next((f for f in feats if f["tags"].get("name") == "Pałac Kultury i Nauki"), None)
+
+
+def in_pkin(f):
+    return pkin is not None and pkin["geom"].contains(f["geom"].representative_point())
 
 
 def tag(f, k):
@@ -557,6 +571,51 @@ for f in render:
     if f["maxh"] is None and np.median(nd_max[f["rr"], f["cc"]]) < 1.5:
         top[f["rr"], f["cc"]] = 3.2 * (parse_len(tag(f, "building:levels")) or 1)
         note("no LiDAR + no height -> levels:", f["id"], tag(f, "name"))
+
+# East Portland: low buildings that the LiDAR reads as 30-50 m "towers" (the Leach ravine). Two causes:
+# - a house under 40-60 m Douglas firs: Warsaw's clipping below cuts canopy off a roof only where the ortho is green,
+#   and dark conifer crowns often are not;
+# - a house built after the 2014 flight on land that was forest then: the 2022 ortho shows a roof (not green at all),
+#   the 2014 DSM the trees cleared for it (OSM ids from 2023 on, at SE 130th-136th).
+# So the test is height, not colour, for a building low by OSM (height < 15 m, < 5 levels):
+# - with an OSM height (most of them: Portland's building import, itself from city LiDAR): cut to it wherever the DSM
+#   stands > 6 m above it -- a first pass at a flat 22 m left 15-22 m houses under firs standing as windowed towers.
+#   But the import's heights caught the same trees (a 3-level house at 35.3 m, a 1-level one at 16.9 m): a height
+#   more than 6 m over 3.5 m a level is the canopy's, and the building counts as untagged;
+# - without one: cut where the DSM stands > 8 m over its levels, else above a house-sized footprint's 14 m (< 400 m2:
+#   80 untagged houses at 15-22 m under firs) or a larger one's 22 m (a 6-storey block is ~20 m and keeps its LiDAR),
+#   to its roof seen between branches (non-green cells), else to its levels.
+if CITY != "warsaw":
+    n_cut = n_tag = n_roof = n_lvl = n_bad = 0
+    for f in render:
+        if f["part"] or f["area"] >= 3000:
+            continue
+        lv = parse_len(tag(f, "building:levels"))
+        if f["maxh"] is not None and lv and lv < 5 and f["maxh"] > 3.5 * lv + 6:
+            f["maxh"], n_bad = None, n_bad + 1  # the tag measured the trees
+        if (f["maxh"] is not None and f["maxh"] >= 15) or (lv and lv >= 5):
+            continue
+        v = nd_max_b[f["rr"], f["cc"]]
+        p90 = float(np.percentile(v, 90))
+        if p90 <= (f["maxh"] + 6 if f["maxh"] is not None else 3.5 * lv + 8 if lv else
+                   14 if f["area"] < 400 else 22):
+            continue
+        cap = 3.5 * lv + 5 if lv else 12.0  # 1-3 storeys
+        if f["maxh"] is not None:
+            h, n_tag = f["maxh"], n_tag + 1
+        else:
+            roof = exg[f["rr"], f["cc"]] <= 0.03
+            h_roof = float(np.percentile(v[roof], 75)) + 1.0 if roof.sum() >= max(6, 0.2 * len(v)) else None
+            if h_roof is not None and h_roof <= cap:
+                h, n_roof = h_roof, n_roof + 1
+            else:  # canopy over all of it, or the DSM's "roof" is the 2014 forest: storeys and a roof
+                h, n_lvl = 3.2 * (lv or 2) + 1.5, n_lvl + 1
+            f["maxh"] = round(h, 1)
+        top[f["rr"], f["cc"]] = np.minimum(top[f["rr"], f["cc"]], h)
+        n_cut += 1
+    note("low buildings the LiDAR reads too tall (canopy over them, or forest before they were built) cut:", n_cut,
+         "| to OSM height:", n_tag, "roof between branches:", n_roof, "levels:", n_lvl,
+         "| OSM heights dropped as canopy-contaminated:", n_bad)
 
 # tree canopy over low roofs: clip to OSM height
 cell_maxh = np.full((D, W), np.nan, np.float32)
@@ -730,7 +789,7 @@ def wall_style(f):
         (parse_colour(f["parent"]["tags"].get("building:colour")) if f.get("parent") else None)
     btype = tag(f, "building") or ""
     h = f["maxh"] or float(np.median(top[f["rr"], f["cc"]]))
-    inside_pkin = pkin["geom"].contains(f["geom"].representative_point())
+    inside_pkin = in_pkin(f)
     if inside_pkin:
         # OSM tags the stone #C6AE7F, a khaki; in photos the weathered sandstone is a mid warm grey (median 118,112,104 overcast, 2026)
         if col is None or col == hex_rgb("#c6ae7f"):
@@ -763,7 +822,7 @@ def roof_style(f):
     if col is None and (f["tags"].get("roof:material") or "").lower() == "glass":
         return pal(soften(hex_rgb("#93adbf"), 0.06), M_GLASS)  # glass atrium roofs (Politechnika's hall): blue-grey
     h = float(np.median(top[f["rr"], f["cc"]]))
-    if pkin["geom"].contains(f["geom"].representative_point()) and col == hex_rgb("#666666"):
+    if in_pkin(f) and col == hex_rgb("#666666"):
         # OSM's dark grey: the ortho shows light stone-grey roofs (its own colours carry the tower's shadow)
         return pal(soften(hex_rgb("#bab3a5"), 0.05), M_ROOF, q=12)
     if h < 40:
@@ -844,7 +903,10 @@ note("thin parts given their neighbour's wall:", n_thin, "of", len(_thin))
 json.dump(THIN_LOG, open("data/debug/thin_parts.json", "w"))
 
 note("OSM roof colours overruled by the ortho:", len(ROOF_OVERRULED), ROOF_OVERRULED[:8])
-H = int(max(topi.max() + g.max(), g.max()) + 12)
+# the tallest a tree may be: ~30 m in central Warsaw; East Portland's Douglas firs (Powell Butte) reach 55-60 m
+TREE_MAX = 32 if CITY == "warsaw" else 75
+# room for buildings and for canopy: on Powell Butte the tallest things are firs on the highest ground, not roofs
+H = int(max(topi.max() + g.max(), (g + np.clip(nd_max, 0, TREE_MAX)).max(), g.max()) + 12)
 note("volume height", H)
 vol = np.zeros((H, D, W), np.uint16)
 
@@ -1046,7 +1108,7 @@ wall_edge = (btop_near > 0) & (nd_mean > 0.6 * btop_near) & (nd_mean > 6)
 veg &= ~wall_edge | (near_tree & (nd_mean < 25))
 step = ndimage.maximum_filter(nd_mean, 3) - ndimage.minimum_filter(nd_mean, 3)
 veg &= ~((btop_near > 0) & (step > 7) & (nd_mean > 0.5 * btop_near))
-veg &= nd_mean < 32  # no trees taller than ~30 m in central Warsaw
+veg &= nd_mean < TREE_MAX  # no taller trees (see TREE_MAX): taller "canopy" is a structure the LiDAR read as green
 # no trees growing out of a stadium shell (its fins and roof edge are LiDAR-high and greenish in the ortho)
 stad = np.zeros((D, W), np.uint16)
 burn(stad, [(geom, 1) for oid, typ, t, geom in osm.areas_with("leisure", ("stadium",))])
@@ -1705,11 +1767,11 @@ if os.environ.get("LMCACHE"):  # the volume before the curated landmark details,
                      trunk_ok=trunk_ok_db, piers=landmarks.PIERS),
                 open("data/cache/pre_state.pkl", "wb"))
 labels, views = landmarks.details(vol, g, top, topi, bmask, feats, pal, C, osm, cells_of, note, leaf_ids)
-np.savez_compressed("data/debug/pkin_box.npz", vol=vol[:, 2360:2660, 600:900], g=g[2360:2660, 600:900],
-                    pal=np.array(pal.entries, np.int32))  # PKiN's block for facade work (r0=2360, c0=600)
-
 import labels as labels_mod
-labels = labels_mod.assemble(labels, osm, lambda r, c: int(g[r, c] + (topi[r, c] if bmask[r, c] else 0)))
+if CITY == "warsaw":
+    np.savez_compressed("data/debug/pkin_box.npz", vol=vol[:, 2360:2660, 600:900], g=g[2360:2660, 600:900],
+                        pal=np.array(pal.entries, np.int32))  # PKiN's block for facade work (r0=2360, c0=600)
+    labels = labels_mod.assemble(labels, osm, lambda r, c: int(g[r, c] + (topi[r, c] if bmask[r, c] else 0)))
 labels_mod.radii(labels, g, g + np.where(bmask, topi, 0))
 
 # ---------------------------------------------------------------- floating debris
@@ -1743,7 +1805,8 @@ if os.environ.get("LMCACHE"):
                 open("data/cache/export_ids.pkl", "wb"))
 # tram routes for the animated trams: merged open-air tram tracks, sampled every metre with ground z
 from shapely.ops import linemerge
-tram_lines = linemerge([l for oid, t, l in osm.lines_with("railway", ("tram",)) if not tunnelish(t)])
+# Portland: MAX is railway=light_rail (the Green Line runs the I-205 corridor on the AOI's west edge)
+tram_lines = linemerge([l for oid, t, l in osm.lines_with("railway", ("tram", "light_rail")) if not tunnelish(t)])
 tram_lines = list(getattr(tram_lines, "geoms", [tram_lines]))
 trams = []
 for ln in sorted(tram_lines, key=lambda l: -l.length):
@@ -1756,10 +1819,12 @@ for ln in sorted(tram_lines, key=lambda l: -l.length):
         path.append([round(p.x, 1), round(p.y, 1), int(g[r, c])])
     trams.append(path)
 note("tram paths:", len(trams), "total km", round(sum(len(p) for p in trams) * 2 / 1000, 2))
-meta = dict(W=W, D=D, H=Hm, base=BASE, tiles=tile_info, center=[CX, CY], theta_deg=math.degrees(THETA), crs="EPSG:2180", trams=trams, jets=jets,
+meta = dict(W=W, D=D, H=Hm, base=BASE, tiles=tile_info, center=[CX, CY], theta_deg=math.degrees(THETA), crs=f"EPSG:{EPSG}", trams=trams, jets=jets,
             palette=[list(e) for e in pal.entries], lamps=lamps, floods=floods, labels=labels, views=views,
             sources=dict(osm=osm.timestamp, lidar="GUGiK NMPT/NMT 2025 (GK-FOTO.6201.5.2025)",
-                         ortho="GUGiK ortofotomapa 2025, 5 cm"))
+                         ortho="GUGiK ortofotomapa 2025, 5 cm") if CITY == "warsaw" else
+            dict(osm=osm.timestamp, lidar=f"Oregon Lidar Consortium Metro {os.environ.get('LIDAR', '2014')} (DOGAMI / NOAA Digital Coast)",
+                 ortho="Oregon Statewide Imagery Program 2022, 1 ft"))
 json.dump(meta, open(OUT / "meta.json", "w"))
 import traffic
 # QA aid: drivable-surface mask (1 = carriageway/road area, 2 = tram bed) for web/tools/qa.mjs
@@ -1779,7 +1844,7 @@ _skip[[i for i, e in enumerate(pal.entries) if e[3] in (M_LEAF, M_LAMP, M_CAR)] 
 _rb, _cb = np.nonzero((deck_col > 0) & (_dd > 2))
 _lim = g[_rb, _cb] + np.clip(np.round(nd_mean[_rb, _cb]), 0, 40).astype(int) + 3
 _top = g[_rb, _cb].copy()
-for _z in range(int(g.min()), int(_lim.max()) + 1):
+for _z in range(int(g.min()), int(_lim.max()) + 1 if len(_lim) else int(g.min())):  # no bridge ways: nothing to scan
     _m = (_z >= g[_rb, _cb]) & (_z < _lim)
     _v = vol[_z, _rb[_m], _cb[_m]]
     _top[np.nonzero(_m)[0][(_v != 0) & ~_skip[_v]]] = _z + 1

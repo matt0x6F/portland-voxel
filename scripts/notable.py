@@ -14,7 +14,7 @@ from pathlib import Path
 import numpy as np
 from pyproj import Transformer
 
-from aoi import RAW, W, D, to_world
+from aoi import EPSG, RAW, W, D, to_world
 
 OUT = Path(RAW) / "notable.json"
 UA = {"User-Agent": "warsaw-vibe-voxel/1.0 (https://github.com/stared/warsaw-vibe-voxel)"}
@@ -50,7 +50,7 @@ def get(url, data=None):
 
 def bbox():
     xs, ys = to_world(np.array([0, W, W, 0]), np.array([0, 0, D, D]))
-    lon, lat = Transformer.from_crs(2180, 4326, always_xy=True).transform(xs, ys)
+    lon, lat = Transformer.from_crs(EPSG, 4326, always_xy=True).transform(xs, ys)
     return lon.min(), lat.min(), lon.max(), lat.max()
 
 

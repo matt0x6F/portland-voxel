@@ -8,9 +8,9 @@ from pyproj import Transformer
 from shapely.geometry import LineString, MultiPolygon, Point, Polygon
 from shapely.ops import polygonize, unary_union
 
-from aoi import RAW, to_grid as _aoi_grid
+from aoi import EPSG, RAW, to_grid as _aoi_grid
 
-_T = Transformer.from_crs(4326, 2180, always_xy=True)
+_T = Transformer.from_crs(4326, EPSG, always_xy=True)
 
 
 def to_grid(lon, lat):

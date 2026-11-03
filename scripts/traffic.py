@@ -15,7 +15,7 @@ import numpy as np
 from pyproj import Transformer
 from scipy.ndimage import maximum_filter1d
 
-from aoi import D, RAW, W, to_grid
+from aoi import D, EPSG, RAW, W, to_grid
 
 DRIVE = {"motorway": 22, "trunk": 16, "primary": 14, "secondary": 13.9, "tertiary": 12.5, "unclassified": 11,
          "residential": 9, "motorway_link": 14, "trunk_link": 12, "primary_link": 11, "secondary_link": 11,
@@ -23,7 +23,7 @@ DRIVE = {"motorway": 22, "trunk": 16, "primary": 14, "secondary": 13.9, "tertiar
 CLASS = {"primary": 3, "trunk": 3, "secondary": 3, "tertiary": 2, "unclassified": 1, "residential": 1}
 WALK = {"footway", "pedestrian", "path", "steps", "living_street", "platform", "cycleway"}
 
-_T = Transformer.from_crs(4326, 2180, always_xy=True)
+_T = Transformer.from_crs(4326, EPSG, always_xy=True)
 
 
 def _num(v, default=None):

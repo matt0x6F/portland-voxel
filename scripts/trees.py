@@ -17,9 +17,9 @@ from pyproj import Transformer
 from scipy.spatial import cKDTree
 
 sys.path.insert(0, str(Path(__file__).parent))
-from aoi import D, RAW, W, to_grid  # noqa: E402
+from aoi import D, EPSG, RAW, W, to_grid  # noqa: E402
 
-T4326 = Transformer.from_crs(4326, 2180, always_xy=True)
+T4326 = Transformer.from_crs(4326, EPSG, always_xy=True)
 
 
 def _num(v):

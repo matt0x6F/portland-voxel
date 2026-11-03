@@ -1,7 +1,8 @@
 """Fallback for fetch_osm.sh when Overpass is overloaded: cut the AOI bbox out of a Geofabrik .osm.pbf and write
 the same JSON as Overpass `nwr(bbox); out body geom(bbox);` (what osm.py and traffic.py read):
 - tagged nodes inside the bbox
-- ways with a node inside the bbox; `geometry` keeps the coordinates of nodes inside or next to one, else null
+- ways with a node inside the bbox; `geometry` keeps the coordinates of nodes inside or next to one, else null --
+  except closed ways (areas), which keep all of theirs so a park crossing the bbox edge stays a polygon
 - relations with a member way/node kept above; way members carry the same clipped `geometry`
 usage: uv run --with osmium python scripts/osm_pbf.py data/raw/geofabrik/mazowieckie-latest.osm.pbf S,W,N,E out.json
 """
@@ -35,9 +36,12 @@ class Pass1(osmium.SimpleHandler):
         ins = [p is not None and inside(*p) for p in locs]
         if not any(ins):
             return
+        # a closed way keeps every node: clipped Overpass-style, a park crossing the bbox edge (Powell Butte, cut by
+        # the AOI's north and east sides) loses its ring and osm.py reads it as a line -- no fill, no label
+        closed = len(w.nodes) > 3 and w.nodes[0].ref == w.nodes[len(w.nodes) - 1].ref
         geom = []
         for i, p in enumerate(locs):
-            keep = ins[i] or (i > 0 and ins[i - 1]) or (i + 1 < len(ins) and ins[i + 1])
+            keep = closed or ins[i] or (i > 0 and ins[i - 1]) or (i + 1 < len(ins) and ins[i + 1])
             geom.append({"lat": round(p[0], 7), "lon": round(p[1], 7)} if (keep and p is not None) else None)
         ways[w.id] = {"type": "way", "id": w.id, "nodes": [nd.ref for nd in w.nodes], "geometry": geom,
                       "tags": {t.k: t.v for t in w.tags}}
