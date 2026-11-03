@@ -35,6 +35,10 @@ export function dataTexture(data: Uint8Array | Uint16Array, w: number, h: number
   return t;
 }
 
+// Text from the map data (OSM names, kinds) is anyone's edit: escape it before it goes into an html string for el()
+const ESC: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+export const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => ESC[c]);
+
 export function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, html = '', parent: HTMLElement = document.body) {
   const e = document.createElement(tag);
   e.className = className;

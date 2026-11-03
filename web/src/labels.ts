@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Rect } from './hud';
 import type { Facts, Label } from './types';
-import { $, el } from './util';
+import { $, el, esc } from './util';
 import type { World } from './world';
 
 interface Pin {
@@ -53,8 +53,8 @@ export class Labels {
   }
 
   private add(cls: string, f: Facts, p: THREE.Vector3, base: THREE.Vector3, R: number): Pin {
-    const facts = details(f).map((d) => `<span>${d}</span>`).join('');
-    const e = el('div', cls, `<i class="dot"></i><i class="stem"></i><div class="txt"><b>${f.name}</b><span>${f.en ?? f.kind}</span>${facts ? `<p>${facts}</p>` : ''}</div>`, this.host);
+    const facts = details(f).map((d) => `<span>${esc(d)}</span>`).join('');
+    const e = el('div', cls, `<i class="dot"></i><i class="stem"></i><div class="txt"><b>${esc(f.name)}</b><span>${esc(f.en ?? f.kind)}</span>${facts ? `<p>${facts}</p>` : ''}</div>`, this.host);
     return { el: e, txt: $('.txt', e), p, base, R, occluded: false, w: 0, h: 0, far: f.far ?? 1300, level: -1, dims: [], shift: 0, on: false, side: 'r', since: -1 };
   }
 

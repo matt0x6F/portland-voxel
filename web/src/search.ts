@@ -1,4 +1,4 @@
-import { $, el } from './util';
+import { $, el, esc } from './util';
 
 export interface SearchItem {
   name: string;
@@ -73,7 +73,7 @@ export class PlaceSearch {
     this.hits = this.find(this.input.value);
     if (!this.hits.length && this.input.value.trim()) { this.list.innerHTML = '<li class="none">no places match — try a street or building name</li>'; return; }
     this.list.innerHTML = this.hits.map((it, i) =>
-      `<li class="${i === this.sel ? 'sel' : ''}" data-i="${i}"><span>${it.name}</span><em>${it.kind === 'yes' ? '' : it.kind}</em></li>`).join('');
+      `<li class="${i === this.sel ? 'sel' : ''}" data-i="${i}"><span>${esc(it.name)}</span><em>${it.kind === 'yes' ? '' : esc(it.kind)}</em></li>`).join('');
     this.list.querySelectorAll<HTMLElement>('li').forEach((li) => li.addEventListener('mousedown', (e) => { e.preventDefault(); this.pick(this.hits[+li.dataset.i!]); }));
   }
 
