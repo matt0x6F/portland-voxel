@@ -3,3 +3,6 @@
 __pycache__/
 web/node_modules/
 web/dist/
+
+# built per city by scripts/build_portland.sh
+web/public/data/
