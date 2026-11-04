@@ -31,7 +31,7 @@ const SPEC: Record<Kind, Spec> = {
   aerial: { cars: 1, len: 8.5, gap: 0, w: 4.2, h: 3.4, body: 0xd5dadd, band: 0x5d6266, off: 0, dwell: 30 },
 };
 const MAX_SECTIONS = 1500, MAX_MARKERS = 2500, REACH = 5000, LAYOVER = 3600, NEAR = 250;
-const MARK_PX = 7; // a far vehicle's marker, pixels across (rail half as big again)
+const MARK_PX = 5; // a far vehicle's marker, pixels across (rail half as big again; a cube seen aslant looks ~1.5x)
 const DAYS: DayType[] = ['sunday', 'weekday', 'weekday', 'weekday', 'weekday', 'weekday', 'saturday'];
 
 function decodeShape(flat: number[]): Shape {
@@ -100,6 +100,7 @@ export class Transit {
   private readonly winMat = new THREE.MeshStandardMaterial({ color: 0x26323d, roughness: 0.15, metalness: 0.4, emissive: new THREE.Color(1.0, 0.85, 0.6), emissiveIntensity: 0 });
   private day = 1;
   private secs = 12 * 3600;
+  private wall = performance.now(); // the clock runs on real time, not the frame step (capped for animation)
   fine: (x: number, z: number) => boolean = () => true;
   shown = 0;
   marked = 0;
@@ -134,6 +135,7 @@ export class Transit {
   setClock(day: number, hour: number) {
     this.day = day;
     this.secs = hour * 3600;
+    this.wall = performance.now();
   }
 
   private blocksFor(file: string) {
@@ -155,8 +157,10 @@ export class Transit {
     return this.index.dates[key] ?? this.index.fallback[DAYS[date.getDay()]];
   }
 
-  update(dt: number, camera: THREE.PerspectiveCamera, night: number) {
-    this.secs += dt;
+  update(camera: THREE.PerspectiveCamera, night: number) {
+    const now = performance.now();
+    this.secs += (now - this.wall) / 1000;
+    this.wall = now;
     if (this.secs >= 86400) { this.secs -= 86400; this.day++; }
     const m = new THREE.Matrix4(), part = new THREE.Matrix4(), lift = new THREE.Matrix4(), pos = new THREE.Vector3(), q = new THREE.Quaternion(), qp = new THREE.Quaternion();
     const up = new THREE.Vector3(0, 1, 0), side = new THREE.Vector3(1, 0, 0), sc = new THREE.Vector3(), c = new THREE.Color();

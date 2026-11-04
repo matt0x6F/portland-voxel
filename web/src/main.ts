@@ -41,6 +41,7 @@ const qs = new URLSearchParams(location.search);
 // The clock is live -- Portland's time now, following it second by second -- unless a link pins a moment (?date, ?hour)
 // or the viewer drags the date or time; dragging the time back onto its "now" mark makes it live again.
 let live = !qs.get('date') && !qs.get('hour');
+let phoneZones = false; // pickEngine set the phone default (not the address bar)
 let engine: Engine = pickEngine(); // 'lod' once a citywide meta (meta.chunks) has loaded, on any device
 const renderer = makeRenderer();
 const scene = new THREE.Scene();
@@ -88,6 +89,7 @@ boot();
 // phones get the real area over clay (zones.ts); ?engine=full insists on the whole city
 function pickEngine(): Engine {
   if (Math.min(screen.width, screen.height) < 600 && !qs.get('shape') && qs.get('engine') !== 'full') {
+    phoneZones = true;
     qs.set('shape', 'budget'); qs.set('budget', '0.75');
     history.replaceState(null, '', `?${qs}`);
   }
@@ -268,6 +270,10 @@ async function boot() {
   if (meta.chunks) {
     // the citywide map: streamed by distance, and seen from far enough to need a longer view than one district
     engine = 'lod';
+    if (phoneZones) { // the phone default doesn't apply here: out of the address bar, so shared links don't carry it
+      qs.delete('shape'); qs.delete('budget');
+      history.replaceState(null, '', `?${qs}`);
+    }
     camera.far = Math.max(camera.far, 1.5 * Math.max(meta.W, meta.D));
     camera.updateProjectionMatrix();
     controls.maxDistance = Math.max(controls.maxDistance, 0.9 * Math.max(meta.W, meta.D));
@@ -371,7 +377,7 @@ renderer.setAnimationLoop((now) => {
   fountains?.update(t, daylight.night);
   precip.update(t, camera.position, daylight.weather, daylight.night);
   streets?.update(camera, daylight.night);
-  transit?.update(dt, camera, daylight.night);
+  transit?.update(camera, daylight.night);
   if (city?.complete) document.body.classList.remove('loading');
   if (life) {
     life.group.visible = !city || city.complete;
