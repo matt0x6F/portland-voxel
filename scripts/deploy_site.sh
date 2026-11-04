@@ -51,6 +51,15 @@ if [ "$what" = data ] || [ "$what" = all ]; then
   export RCLONE_CONFIG_R2_TYPE=s3 RCLONE_CONFIG_R2_PROVIDER=Cloudflare RCLONE_CONFIG_R2_ACL=private \
     RCLONE_CONFIG_R2_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID" RCLONE_CONFIG_R2_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY" \
     RCLONE_CONFIG_R2_ENDPOINT="https://$CLOUDFLARE_ACCOUNT_ID.r2.cloudflarestorage.com" RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true
+  # the token page shows three values: the S3 access key ID (32 characters) and secret (64), not the token value.
+  # With wrong keys rclone 1.75 reports the destination as "a file not a directory": check them first instead.
+  if [ ${#R2_ACCESS_KEY_ID} -ne 32 ] || [ ${#R2_SECRET_ACCESS_KEY} -ne 64 ]; then
+    echo "R2_ACCESS_KEY_ID should be 32 characters (got ${#R2_ACCESS_KEY_ID}) and R2_SECRET_ACCESS_KEY 64 (got ${#R2_SECRET_ACCESS_KEY}):"
+    echo "use the 'Access Key ID' and 'Secret Access Key' from R2 > Manage API tokens, not the token value"
+    exit 1
+  fi
+  rclone lsf "r2:$BUCKET" --max-depth 1 >/dev/null 2>&1 || {
+    echo "R2 refused these keys for bucket $BUCKET: check the token has Object Read & Write on it"; exit 1; }
   # tiles change only with a rebuild: a day in browsers; the rest (meta, places, streets, transit) an hour
   rclone sync web/public/data/tiles "r2:$BUCKET/tiles" --transfers 64 --checkers 64 --fast-list --progress \
     --header-upload "Cache-Control: public, max-age=86400" --header-upload "Content-Type: application/octet-stream"
