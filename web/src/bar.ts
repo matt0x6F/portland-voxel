@@ -80,7 +80,8 @@ export class Bar {
     this.el.id = 'bar';
     this.search = new PlaceSearch(this.el, 'Search East Portland…');
     this.date = new Slider(this.el, { min: 1, max: 365, step: 1, marks: days, near: 3, log: false, show: dayMonth, onInput: onDay, onChange: onDayEnd });
-    this.time = new Slider(this.el, { min: 4, max: 23.5, step: 1 / 60, marks: {}, near: 1 / 3, log: false, show: hhmm, onInput: onHour });
+    // the whole day: the clock follows Portland's live time (main.ts), small hours included
+    this.time = new Slider(this.el, { min: 0, max: 24 - 1 / 60, step: 1 / 60, marks: {}, near: 1 / 3, log: false, show: hhmm, onInput: onHour });
     this.sky = choices('sky', 'Weather', weathers, this.el);
     this.sky.addEventListener('click', (e) => { const b = (e.target as HTMLElement).closest('button'); if (b) onWeather(b.dataset.v!); });
     this.river = new Slider(this.el, { min: Math.min(...Object.values(river)), max: 1150, step: 1, marks: river, near: 20, log: true, shift: 460, show: (cm) => `Vistula ${cm} cm`, onInput: onRiver });
@@ -90,6 +91,7 @@ export class Bar {
   setDay(d: number, times: Record<string, number>) { this.date.set(d); this.time.setMarks(times); }
   setDays(days: Record<string, number>) { this.date.setMarks(days); this.date.set(this.date.value); }
   setHour(h: number) { if (document.activeElement !== this.time.input) this.time.set(h); }
+  setHourMarks(times: Record<string, number>) { this.time.setMarks(times); }
   setWeather(w: string, mark: string) {
     this.sky.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === w));
     $('.val', this.sky).innerHTML = `Weather${mark ? ` <span class="mark">${mark}</span>` : ''}`;

@@ -6,6 +6,15 @@ const nthSunday = (year: number, month: number, n: number) => 1 + (7 - new Date(
 export const dayOfYear = (d: Date) => Math.round((Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) - Date.UTC(d.getFullYear(), 0, 0)) / 864e5);
 export const dateOf = (day: number, year = new Date().getFullYear()) => new Date(year, 0, day);
 
+// The moment the browser's clock says, as it is in Portland -- wherever the viewer is: the map is the city's own time
+// (someone in New York at 9 pm sees Portland at 6 pm). Day of year and fractional hour, Pacific time with its DST.
+const PDX = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', year: 'numeric', month: 'numeric', day: 'numeric',
+  hour: 'numeric', minute: 'numeric', second: 'numeric', hourCycle: 'h23' });
+export function portlandNow(at = new Date()) {
+  const p = Object.fromEntries(PDX.formatToParts(at).map((x) => [x.type, x.value]));
+  return { day: dayOfYear(new Date(+p.year, +p.month - 1, +p.day)), hour: +p.hour + +p.minute / 60 + +p.second / 3600 };
+}
+
 // US Pacific time: PDT (UTC-7) from the second Sunday of March to the first Sunday of November, else PST (UTC-8)
 export function utcOffset(day: number, year = new Date().getFullYear()) {
   const start = dayOfYear(new Date(year, 2, nthSunday(year, 2, 2))), end = dayOfYear(new Date(year, 10, nthSunday(year, 10, 1)));

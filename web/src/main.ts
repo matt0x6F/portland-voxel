@@ -17,7 +17,7 @@ import { StreetLife } from './sim/life';
 import type { Kind, TrafficData } from './sim/types';
 import { TileStreamer } from './stream';
 import type { Facts, Label, Meta, Place, View } from './types';
-import { dateOf, dayOfYear, hourAt, solarNoon } from './sun';
+import { dateOf, dayOfYear, hourAt, portlandNow, solarNoon } from './sun';
 import { $, coarsePointer, ease, el, fetchJson, lerp } from './util';
 import { pkinLight } from './sky';
 import { type Climate, Precip, typical, type Weather, WEATHERS } from './weather';
@@ -32,10 +32,13 @@ declare global {
 // Warszawa-Bulwary gauge, cm (scale since 1 Nov 2025)
 const RIVER = { 'tiny creek': -355, 'record low': 104, typical: 185, '2010 flood': 879, '1844 flood': 963 }; // below the record, the estimated bed (scripts/flood.py)
 
-const TODAY = dayOfYear(new Date());
+const TODAY = portlandNow().day; // Portland's today, not the viewer's (the date line can split them)
 const DAYS = { midsummer: 172, midwinter: 355, today: TODAY };
 
 const qs = new URLSearchParams(location.search);
+// The clock is live -- Portland's time now, following it second by second -- unless a link pins a moment (?date, ?hour)
+// or the viewer drags the date or time; dragging the time back onto its "now" mark makes it live again.
+let live = !qs.get('date') && !qs.get('hour');
 let engine: Engine = pickEngine(); // 'lod' once a citywide meta (meta.chunks) has loaded, on any device
 const renderer = makeRenderer();
 const scene = new THREE.Scene();
@@ -44,9 +47,14 @@ const controls = makeControls();
 const post = makePost(renderer, scene, camera);
 const daylight = new Daylight(renderer, scene, engine === 'zones' ? 2048 : 4096);
 const nav = new Nav(camera, controls, renderer.domElement, scene, (v) => flyTo(v), onMode);
-const bar = new Bar({ days: DAYS, weathers: ['typical', ...Object.keys(WEATHERS)], river: RIVER, onDay: (d) => { setDay(d); share(); },
+const bar = new Bar({ days: DAYS, weathers: ['typical', ...Object.keys(WEATHERS)], river: RIVER, onDay: (d) => { live = false; setDay(d); share(); },
   onDayEnd: () => { if (weatherName === 'typical') setWeather('typical'); },
-  onHour: (h) => { setHour(h); share(); }, onWeather: (w) => { setWeather(w); share(); }, onRiver: (cm) => flood?.setGauge(cm) });
+  onHour: (h) => {
+    const n = portlandNow();
+    live = daylight.day === n.day && Math.abs(h - n.hour) < 2 / 60; // snapped onto "now": live again
+    setHour(live ? n.hour : h);
+    share();
+  }, onWeather: (w) => { setWeather(w); share(); }, onRiver: (cm) => flood?.setGauge(cm) });
 const precip = new Precip(scene);
 const map = new THREE.Box3();
 const tiltShift = qs.get('tilt') !== '0' && innerWidth >= 600 && (engine === 'city' || qs.get('tilt') === '1');
@@ -131,15 +139,17 @@ function setHour(h: number) {
 }
 
 const timesOf = (d: number) => ({ morning: Math.max(7.5, hourAt(d, 6, false)), midday: solarNoon(d), 'golden hour': hourAt(d, 5, true),
-  'blue hour': hourAt(d, -7, true), night: Math.min(23.5, Math.max(23, hourAt(d, -14, true))) });
+  'blue hour': hourAt(d, -7, true), night: Math.min(23.5, Math.max(23, hourAt(d, -14, true))),
+  ...(d === portlandNow().day ? { now: portlandNow().hour } : {}) }); // on today, the time slider marks Portland's now
 
 function setDay(d: number) {
-  const times = timesOf(daylight.day), was = Object.entries(times).find(([, h]) => Math.abs(h - daylight.hour) < 1 / 3)?.[0] as keyof typeof times | undefined;
+  const times: Record<string, number> = timesOf(daylight.day);
+  const was = Object.entries(times).find(([k, h]) => k !== 'now' && Math.abs(h - daylight.hour) < 1 / 3)?.[0] as keyof ReturnType<typeof timesOf> | undefined;
   daylight.day = d;
   const now = timesOf(d);
   bar.setDay(d, now);
   offerWeathers(d);
-  setHour(was ? now[was] : daylight.hour);
+  setHour((was && now[was]) ?? daylight.hour);
 }
 
 function offerWeathers(d: number) {
@@ -172,8 +182,10 @@ function share() {
   clearTimeout(shareT);
   shareT = setTimeout(() => {
     const d = dateOf(daylight.day);
-    qs.set('date', `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
-    qs.set('hour', daylight.hour.toFixed(2));
+    if (live) { qs.delete('date'); qs.delete('hour'); } else { // a live link stays live; a chosen moment is pinned
+      qs.set('date', `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
+      qs.set('hour', daylight.hour.toFixed(2));
+    }
     if (weatherName !== 'typical') qs.set('weather', weatherName); else qs.delete('weather');
     history.replaceState(null, '', `?${qs}`);
   }, 400);
@@ -277,7 +289,8 @@ async function boot() {
   const md = qs.get('date')?.split('-').map(Number);
   setDay(md ? dayOfYear(new Date(new Date().getFullYear(), md[0] - 1, md[1])) : TODAY);
   setWeather((qs.get('weather') ?? '') in WEATHERS ? qs.get('weather')! : 'typical', true);
-  setHour(qs.get('hour') ? +qs.get('hour')! : timesOf(daylight.day)['golden hour']);
+  // live: now in Portland; a link with only ?date= pins the day at its golden hour
+  setHour(live ? portlandNow().hour : qs.get('hour') ? +qs.get('hour')! : timesOf(daylight.day)['golden hour']);
   if (engine === 'lod') {
     city = (await import('./lod')).installLod({ streamer, meta, camera, uniforms, focus, qs });
   } else if (engine === 'zones') {
@@ -308,8 +321,24 @@ async function boot() {
 let lastT = performance.now(), riverT = 0, riverSeen = -1e9;
 const frames: number[] = [];
 const t0 = lastT;
+let clockT = 0;
+// the live clock: once a second, Portland's time; past midnight the day turns (and today's typical weather with it);
+// the time slider's "now" mark moves along
+function tickClock(now: number) {
+  if (!live || now - clockT < 1000) return;
+  clockT = now;
+  const n = portlandNow();
+  if (n.day !== daylight.day) {
+    setDay(n.day);
+    if (weatherName === 'typical') setWeather('typical');
+  }
+  bar.setHourMarks(timesOf(n.day));
+  setHour(n.hour);
+}
+
 renderer.setAnimationLoop((now) => {
   fly?.(now);
+  tickClock(now);
   stepWeather(now);
   const dt = Math.min(0.1, (now - lastT) / 1000);
   lastT = now;
