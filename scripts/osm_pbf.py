@@ -21,6 +21,32 @@ def inside(lat, lon):
 
 
 nodes, ways = [], {}
+# Multipolygon relations keep their members whole: clipped like ways, a river or a park bigger than the bbox can't
+# close its rings and osm.py drops it (downtown Portland: the Willamette's relation arrived with 145 of 149 members
+# empty -- no river, so the ground rule paved it). Pass 0 maps member ways to their relations; ways in one keep
+# every node; pass 1b fetches the members wholly outside the bbox of relations that touch it.
+member_of = {}   # way id -> True for ways in any multipolygon relation
+extra = {}       # way id -> full geometry, for relation members outside the bbox (not emitted as standalone ways)
+
+
+class Pass0(osmium.SimpleHandler):
+    def relation(self, r):
+        if r.tags.get("type") not in ("multipolygon", "boundary") or r.tags.get("boundary") == "administrative":
+            return
+        for m in r.members:
+            if m.type == "w":
+                member_of[m.ref] = True
+
+
+class Pass1b(osmium.SimpleHandler):
+    def __init__(self, want):
+        super().__init__()
+        self.want = want
+
+    def way(self, w):
+        if w.id in self.want:
+            extra[w.id] = [{"lat": round(nd.location.lat, 7), "lon": round(nd.location.lon, 7)}
+                           if nd.location.valid() else None for nd in w.nodes]
 
 
 class Pass1(osmium.SimpleHandler):
@@ -38,7 +64,7 @@ class Pass1(osmium.SimpleHandler):
             return
         # a closed way keeps every node: clipped Overpass-style, a park crossing the bbox edge (Powell Butte, cut by
         # the AOI's north and east sides) loses its ring and osm.py reads it as a line -- no fill, no label
-        closed = len(w.nodes) > 3 and w.nodes[0].ref == w.nodes[len(w.nodes) - 1].ref
+        closed = (len(w.nodes) > 3 and w.nodes[0].ref == w.nodes[len(w.nodes) - 1].ref) or w.id in member_of
         geom = []
         for i, p in enumerate(locs):
             keep = closed or ins[i] or (i > 0 and ins[i - 1]) or (i + 1 < len(ins) and ins[i + 1])
@@ -60,6 +86,8 @@ class Pass2(osmium.SimpleHandler):
                 if g is not None:
                     hit = True
                     mem.append({"type": "way", "ref": m.ref, "role": m.role, "geometry": g["geometry"]})
+                elif m.ref in extra:
+                    mem.append({"type": "way", "ref": m.ref, "role": m.role, "geometry": extra[m.ref]})
                 else:
                     mem.append({"type": "way", "ref": m.ref, "role": m.role})
             elif m.type == "n":
@@ -75,7 +103,29 @@ class Pass2(osmium.SimpleHandler):
             rels.append({"type": "relation", "id": r.id, "members": mem, "tags": {t.k: t.v for t in r.tags}})
 
 
+Pass0().apply_file(pbf)
 Pass1().apply_file(pbf, locations=True, idx="flex_mem")
+
+
+class Touching(osmium.SimpleHandler):
+    """the members, outside the bbox, of multipolygon relations with a member way inside it"""
+    def __init__(self):
+        super().__init__()
+        self.want = set()
+
+    def relation(self, r):
+        if r.tags.get("type") not in ("multipolygon", "boundary") or r.tags.get("boundary") == "administrative":
+            return
+        refs = [m.ref for m in r.members if m.type == "w"]
+        if any(x in ways for x in refs):
+            self.want.update(x for x in refs if x not in ways)
+
+
+t = Touching()
+t.apply_file(pbf)
+if t.want:
+    Pass1b(t.want).apply_file(pbf, locations=True, idx="flex_mem")
+print(f"multipolygon members outside the bbox fetched whole: {len(extra)} of {len(t.want)}")
 node_ids = {n["id"]: (n["lat"], n["lon"]) for n in nodes}
 Pass2().apply_file(pbf)
 ts = os.path.basename(pbf)
