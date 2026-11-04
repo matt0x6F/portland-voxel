@@ -1,6 +1,6 @@
 """The Vistula's level as a slider (viewer: water level), from record drought to the great floods.
 
-Input: data/ground.npz (voxelize.py: ground height and top colour), data/prep.npz (the DTM over the river, its real
+Input: aoi.GROUND_FILE (voxelize.py: ground height and top colour), aoi.PREP_FILE (the DTM over the river, its real
 water surface on the LiDAR day).
 Output: web/public/data/flood.bin = gzip of two [D, W] uint8 grids,
   spill: the lowest water level (m above the model base) at which the river reaches the cell -- the highest ground on
@@ -16,8 +16,10 @@ from pathlib import Path
 import numpy as np
 from scipy import ndimage
 
+from aoi import GROUND_FILE, PREP_FILE
+
 OUT = Path("web/public/data")
-z = np.load("data/ground.npz")
+z = np.load(GROUND_FILE)
 g = z["g"].astype(np.int16)
 D, W = g.shape
 meta = json.load(open(OUT / "meta.json"))
@@ -29,7 +31,7 @@ river = lab == np.argmax(np.bincount(lab.ravel())[1:]) + 1
 print("river cells", river.sum(), "of", water.sum(), "water cells")
 
 # the real surface on the LiDAR day (the voxels flatten it to one level): it falls ~0.45 m from south to north
-dtm = np.load("data/prep.npz", mmap_mode="r")["dtm"]
+dtm = np.load(PREP_FILE, mmap_mode="r")["dtm"]
 rows = np.nonzero(river)[0]
 v = dtm[river]
 ok = np.isfinite(v) & (v < np.nanpercentile(v, 90))  # not the bank cells caught in the river outline

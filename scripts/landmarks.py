@@ -7,6 +7,8 @@ import numpy as np
 from shapely.geometry import Point
 from scipy import ndimage
 
+from aoi import PREP_FILE  # the AOI's own prep (data/prep_<name>.npz)
+
 M_WALL, M_GLASS, M_PKIN, M_CONCRETE, M_CLOCK = 1, 2, 7, 13, 14
 
 # OSM name -> what a label shows; order = label priority (decluttering keeps earlier ones).
@@ -1849,7 +1851,7 @@ _ORTO = None
 def _orto():
     global _ORTO
     if _ORTO is None:
-        _ORTO = np.load("data/prep.npz", mmap_mode="r")["orto"]  # 2025 ortho, 5 px per grid metre
+        _ORTO = np.load(PREP_FILE, mmap_mode="r")["orto"]  # 2025 ortho, 5 px per grid metre
     return _ORTO
 
 
@@ -2236,7 +2238,7 @@ SASKI_DIG = (1532, 1720, 1378, 1505)
 def saski_site(vol, g, pal, note):
     """The tents from the LiDAR (DSM - DTM, 3-9 m, white membrane over a gabled frame) and the excavation's ground
     from the ortho cell by cell (light stone foundation walls in sand), instead of uniform brown dirt."""
-    p = np.load("data/prep.npz", mmap_mode="r")
+    p = np.load(PREP_FILE, mmap_mode="r")
     white, frame = pal((236, 236, 232), 0), pal((205, 205, 200), 0)
     n = 0
     for r0, r1, c0, c1 in SASKI_TENTS:
@@ -2534,7 +2536,7 @@ def kladka_abakanowicz(vol, g, pal, note):
     """The deck's real outline from the LiDAR (the OSM way is one 5 m line): cells within 10 m of the deck whose DSM
     samples lie within -1.2..+3 m of the deck level over a drop; then the girder, railings, seating and the frame."""
     r0, r1, c0, c1 = KLADKA["box"]
-    p = np.load("data/prep.npz", mmap_mode="r")
+    p = np.load(PREP_FILE, mmap_mode="r")
     dtm_all = p["dtm"]
     BASE = math.floor(float(np.min(dtm_all))) - 3
     dsm = np.asarray(p["dsm"][2 * r0:2 * r1, 2 * c0:2 * c1], np.float32).reshape(r1 - r0, 2, c1 - c0, 2)
