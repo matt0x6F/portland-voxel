@@ -4,9 +4,10 @@
 # Worker's assets (20,000 free / 100,000 paid) or GitHub Pages (1 GB); R2 has no egress fees, and with a custom domain
 # Cloudflare's cache serves repeat requests without touching the bucket.
 #
-# usage: SITE=portland.example.com DATA=tiles.example.com sh scripts/deploy_site.sh data   # sync the data to R2
-#        SITE=portland.example.com DATA=tiles.example.com sh scripts/deploy_site.sh app    # build + deploy the app
-#        SITE=... DATA=... sh scripts/deploy_site.sh                                       # both, data first
+# usage: sh scripts/deploy_site.sh data   # sync the data to R2
+#        sh scripts/deploy_site.sh app    # build + deploy the app
+#        sh scripts/deploy_site.sh        # both, data first
+# (SITE and DATA default to portland.ooo-yay.com and tiles.ooo-yay.com)
 #
 # The data sync uses rclone (brew install rclone) over R2's S3 API, with an R2 API token (Object Read & Write on the
 # bucket) from the environment, never from a file in the repo:
@@ -16,8 +17,8 @@
 # One-time setup (bucket, its domain, CORS) is printed by `sh scripts/deploy_site.sh setup`.
 set -e
 cd "$(dirname "$0")/.."
-: "${SITE:?set SITE, the site's domain (e.g. portland.example.com)}"
-: "${DATA:?set DATA, the data's domain (e.g. tiles.example.com)}"
+SITE=${SITE:-portland.ooo-yay.com}  # the site (also the Worker's custom domain in web/wrangler.jsonc)
+DATA=${DATA:-tiles.ooo-yay.com}     # the data: the R2 bucket's custom domain
 BUCKET=${BUCKET:-portland-voxel-data}
 what=${1:-all}
 

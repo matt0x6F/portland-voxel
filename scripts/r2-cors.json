@@ -1,0 +1,5 @@
+{
+  "rules": [
+    { "allowed": { "origins": ["https://portland.ooo-yay.com", "http://localhost:5179"], "methods": ["GET", "HEAD"] } }
+  ]
+}
