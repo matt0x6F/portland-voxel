@@ -7,11 +7,15 @@ import { fetchJson, hash } from './util';
 // vehicle pulls away, cruises and brakes in the time the schedule gives it, after a stop's dwell (stations always,
 // about two bus stops in three) taken out of that time, so it keeps to the timetable. Positions are a function of the
 // clock alone: dragging the time slider moves every vehicle to that minute, and from there it runs on in real time.
+// Each date plays its own service (a holiday its reduced timetable); past the feed's end, a sample day of its kind.
+// Up close, over the map's fine detail, each vehicle is drawn whole; farther off, as a marker in its line's colour
+// a few pixels across, so the citywide view shows the whole network moving.
 
 type Kind = 'max' | 'streetcar' | 'bus' | 'bus60' | 'wes' | 'aerial';
 type Net = { routes: [string, string, Kind, string][]; shapes: number[][] };
-type DayData = { date: string; trips: number[][] };
+type DayData = { dates: string[]; trips: number[][] };
 type DayType = 'weekday' | 'saturday' | 'sunday';
+type Index = { dates: Record<string, string>; fallback: Record<DayType, string>; end: string };
 
 interface Shape { x: Float32Array; y: Float32Array; z: Float32Array; s: Float32Array }
 interface Trip { route: number; shape: number; arr: Float64Array; dep: Float64Array; s: Float64Array; start: number; end: number; id: number }
@@ -26,7 +30,8 @@ const SPEC: Record<Kind, Spec> = {
   wes: { cars: 1, len: 26, gap: 0, w: 3.0, h: 4.2, body: 0xe4e4e2, band: 0x6e6e6e, off: 0, dwell: 30 },
   aerial: { cars: 1, len: 8.5, gap: 0, w: 4.2, h: 3.4, body: 0xd5dadd, band: 0x5d6266, off: 0, dwell: 30 },
 };
-const MAX_SECTIONS = 1500, REACH = 5000, LAYOVER = 3600, NEAR = 250;
+const MAX_SECTIONS = 1500, MAX_MARKERS = 2500, REACH = 5000, LAYOVER = 3600, NEAR = 250;
+const MARK_PX = 7; // a far vehicle's marker, pixels across (rail half as big again)
 const DAYS: DayType[] = ['sunday', 'weekday', 'weekday', 'weekday', 'weekday', 'weekday', 'saturday'];
 
 function decodeShape(flat: number[]): Shape {
@@ -88,15 +93,19 @@ export class Transit {
   private readonly shapes: Shape[];
   private readonly routes: Net['routes'];
   private readonly colours: THREE.Color[];
-  private readonly days = new Map<DayType, Block[] | 'loading'>();
+  private readonly days = new Map<string, Block[] | 'loading'>();
+  private readonly index: Index;
+  private readonly markers: THREE.InstancedMesh;
   private readonly parts: THREE.InstancedMesh[] = [];
   private readonly winMat = new THREE.MeshStandardMaterial({ color: 0x26323d, roughness: 0.15, metalness: 0.4, emissive: new THREE.Color(1.0, 0.85, 0.6), emissiveIntensity: 0 });
   private day = 1;
   private secs = 12 * 3600;
   fine: (x: number, z: number) => boolean = () => true;
   shown = 0;
+  marked = 0;
 
-  constructor(net: Net, scene: THREE.Scene) {
+  constructor(net: Net, index: Index, scene: THREE.Scene) {
+    this.index = index;
     this.routes = net.routes;
     this.shapes = net.shapes.map(decodeShape);
     this.colours = net.routes.map((r) => new THREE.Color(r[3]));
@@ -114,6 +123,11 @@ export class Transit {
       scene.add(mesh);
       this.parts.push(mesh);
     });
+    this.markers = new THREE.InstancedMesh(unit, new THREE.MeshBasicMaterial({ color: 0xffffff }), MAX_MARKERS);
+    this.markers.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(MAX_MARKERS * 3), 3);
+    this.markers.frustumCulled = false;
+    this.markers.count = 0;
+    scene.add(this.markers);
   }
 
   /** the clock: day of the year, hour of the day; between calls it runs on in real time */
@@ -122,31 +136,36 @@ export class Transit {
     this.secs = hour * 3600;
   }
 
-  private blocksFor(type: DayType) {
-    const b = this.days.get(type);
+  private blocksFor(file: string) {
+    const b = this.days.get(file);
     if (b === undefined) {
-      this.days.set(type, 'loading');
-      fetchJson<DayData>(`data/transit/${type}.json`).then((d) => this.days.set(type, decodeDay(d, this.routes)))
-        .catch((e) => { console.warn('transit', type, e); this.days.delete(type); });
+      this.days.set(file, 'loading');
+      fetchJson<DayData>(`data/transit/${file}.json`).then((d) => this.days.set(file, decodeDay(d, this.routes)))
+        .catch((e) => { console.warn('transit', file, e); this.days.delete(file); });
       return null;
     }
     return b === 'loading' ? null : b;
   }
 
-  private typeOf(day: number) {
-    return DAYS[new Date(new Date().getFullYear(), 0, day).getDay()];
+  // the timetable of a day of the year: in the year that puts it nearest today (the clock's days carry no year)
+  private fileFor(day: number) {
+    const now = new Date(), y = now.getFullYear();
+    const date = [y - 1, y, y + 1].map((yy) => new Date(yy, 0, day)).sort((a, b) => Math.abs(+a - +now) - Math.abs(+b - +now))[0];
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    return this.index.dates[key] ?? this.index.fallback[DAYS[date.getDay()]];
   }
 
-  update(dt: number, camera: THREE.Camera, night: number) {
+  update(dt: number, camera: THREE.PerspectiveCamera, night: number) {
     this.secs += dt;
     if (this.secs >= 86400) { this.secs -= 86400; this.day++; }
     const m = new THREE.Matrix4(), part = new THREE.Matrix4(), lift = new THREE.Matrix4(), pos = new THREE.Vector3(), q = new THREE.Quaternion(), qp = new THREE.Quaternion();
     const up = new THREE.Vector3(0, 1, 0), side = new THREE.Vector3(1, 0, 0), sc = new THREE.Vector3(), c = new THREE.Color();
     const a: Pt = { x: 0, y: 0, z: 0, dx: 0, dy: 0, hidden: false }, b = { ...a }, cam = camera.position;
-    let n = 0;
+    let n = 0, nm = 0;
+    const pxM = MARK_PX * 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) / innerHeight; // metres per pixel at 1 m
     // today's service, and yesterday's running past midnight (its times go on past 24 h)
     for (const [day, t] of [[this.day, this.secs], [this.day - 1, this.secs + 86400]] as const) {
-      const blocks = this.blocksFor(this.typeOf(day));
+      const blocks = this.blocksFor(this.fileFor(day));
       if (!blocks) continue;
       for (const bl of blocks) {
         if (t < bl.start || t > bl.end) continue;
@@ -154,8 +173,17 @@ export class Transit {
         if (!pose) continue;
         const sh = this.shapes[pose.trip.shape], spec = SPEC[bl.kind];
         sample(sh, pose.s, a);
-        if (a.hidden || Math.hypot(a.x - cam.x, a.y - cam.z) > REACH || !this.fine(a.x, a.y)) continue;
+        if (a.hidden) continue;
         const route = pose.trip.route, col = this.colours[route];
+        if (Math.hypot(a.x - cam.x, a.y - cam.z) > REACH || !this.fine(a.x, a.y)) {
+          // far off, or over coarse ground: a marker, lifted clear of the coarse blocks
+          if (nm >= MAX_MARKERS) continue;
+          const d = Math.hypot(a.x - cam.x, a.z - cam.y, a.y - cam.z);
+          const size = Math.max(3, d * pxM) * (bl.kind.startsWith('bus') ? 1 : 1.5);
+          this.markers.setMatrixAt(nm, m.compose(pos.set(a.x, a.z + 6, a.y), q.identity(), sc.set(size, size, size)));
+          this.markers.setColorAt(nm++, col);
+          continue;
+        }
         for (let k = 0; k < spec.cars && n < MAX_SECTIONS; k++) {
           const front = pose.s - k * (spec.len + spec.gap), back = front - spec.len;
           sample(sh, front, a); sample(sh, back, b);
@@ -185,8 +213,12 @@ export class Transit {
       p.instanceMatrix.needsUpdate = true;
       if (p.instanceColor) p.instanceColor.needsUpdate = true;
     }
+    this.markers.count = nm;
+    this.markers.instanceMatrix.needsUpdate = true;
+    if (this.markers.instanceColor) this.markers.instanceColor.needsUpdate = true;
     this.winMat.emissiveIntensity = night * 1.4;
     this.shown = n;
+    this.marked = nm;
   }
 
   // where a block's vehicle is at t: on a trip (between stops, or standing at one), at a terminus between two trips
@@ -215,5 +247,6 @@ export class Transit {
 }
 
 export async function loadTransit(scene: THREE.Scene) {
-  return new Transit(await fetchJson<Net>('data/transit/net.json'), scene);
+  const [net, index] = await Promise.all([fetchJson<Net>('data/transit/net.json'), fetchJson<Index>('data/transit/index.json')]);
+  return new Transit(net, index, scene);
 }

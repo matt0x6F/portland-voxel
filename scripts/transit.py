@@ -6,8 +6,11 @@ reaching its terminus waits out its layover and leaves again the other way.
 Input: data/raw/gtfs/trimet.zip (https://developer.trimet.org/schedule/gtfs.zip, no key), the Oregon OSM extract
 (bridges and tunnels), the built chunks' ground (scripts/cityground.py) and lidar DSM (bridge decks).
 
-Three representative days, the next Tuesday, Saturday and Sunday the feed covers without a holiday exception (the
-viewer picks by Portland's weekday). Shapes are drawn on the ground; along an OSM bridge of the same kind (road or rail)
+Every date from today to the feed's end plays its own service (holidays their reduced timetable, Fridays their
+Friday-only trips); dates with the same set of services share one file. Past the feed's end, the viewer falls back to
+three sample days -- the next Tuesday, Saturday and Sunday without a holiday exception -- by Portland's weekday, so the
+site keeps running on a stale feed instead of going empty; refreshing the feed (the build does weekly) brings the
+holidays back. Shapes are drawn on the ground; along an OSM bridge of the same kind (road or rail)
 and running the same way, on the deck (from the lidar surface: see deck()); along a tunnel,
 hidden, as outside the built city.
 
@@ -15,8 +18,9 @@ Output web/public/data/transit/
   net.json   {routes: [[name, long name, kind, colour]], shapes: [[x, y, z, s, dx, dy, dz, ds, ...]]}
              city decimetres, deltas after the first vertex; s = metres x 10 along the route's true shape (the
              vertices are simplified, the distances are not); z = HIDDEN where nothing is drawn
-  <day>.json {date, trips: [[route, shape, block, t0, s0, dwell0, dt1, ds1, dwell1, ...]]}: seconds after the service
-             day's midnight (past 24 h after midnight), s in decimetres; dt from the previous stop's departure
+  index.json {dates: {"2026-11-26": "s3", ...}, fallback: {weekday, saturday, sunday: file}, end: last date}
+  s<n>.json  {dates: [...], trips: [[route, shape, block, t0, s0, dwell0, dt1, ds1, dwell1, ...]]}: seconds after the
+             service day's midnight (past 24 h after midnight), s in decimetres; dt from the previous stop's departure
 
 usage: PYTHONPATH=scripts uv run --with osmium --with pandas python scripts/transit.py
 """
@@ -63,13 +67,22 @@ def services_on(d):
     return on - set(cd[(cd.date == ds) & (cd.exception_type == "2")].service_id)
 
 
-DAYS = {}
+# each date to the feed's end by its set of services; the sample days for after it
+END = dt.datetime.strptime(read("feed_info").feed_end_date[0], "%Y%m%d").date()
+SIGS, DATES = {}, {}  # services -> file; date -> file
+d = dt.date.today()
+while d <= END:
+    svc = frozenset(services_on(d))
+    if svc:
+        DATES[str(d)] = SIGS.setdefault(svc, f"s{len(SIGS)}")
+    d += dt.timedelta(1)
+FALLBACK = {}
 for name, wd in (("weekday", 1), ("saturday", 5), ("sunday", 6)):
     d = dt.date.today()
     while d.weekday() != wd or d.strftime("%Y%m%d") in set(cd.date):
         d += dt.timedelta(1)
-    DAYS[name] = (d, services_on(d))
-    print(f"{name}: {d} ({len(DAYS[name][1])} services)")
+    FALLBACK[name] = SIGS.setdefault(frozenset(services_on(d)), f"s{len(SIGS)}")
+print(f"{len(DATES)} dates to {END} in {len(SIGS)} distinct services; sample days {FALLBACK}")
 
 # ---------------------------------------------------------------- routes and vehicles
 routes = read("routes")
@@ -93,12 +106,12 @@ route_rows = [[r.route_short_name or r.route_long_name.replace("Portland Streetc
 KIND = {r.route_id: kind_of(r) for r in routes.itertuples()}
 
 trips = read("trips", usecols=["route_id", "service_id", "trip_id", "block_id", "shape_id"])
-wanted = set().union(*(s for _, s in DAYS.values()))
+wanted = set().union(*SIGS)
 trips = trips[trips.service_id.isin(wanted) & trips.route_id.isin(R)]
 shape_kind = {}
 for r, sh in zip(trips.route_id, trips.shape_id):
     shape_kind.setdefault(sh, KIND[r])
-print(f"{len(trips)} trips over the three days, {len(shape_kind)} shapes")
+print(f"{len(trips)} trips to the feed's end, {len(shape_kind)} shapes")
 
 # ---------------------------------------------------------------- bridges and tunnels
 lon0, lat0, lon1, lat1 = math.inf, math.inf, -math.inf, -math.inf
@@ -194,7 +207,7 @@ gz = CityGround()
 shapes = read("shapes")
 shapes = shapes[shapes.shape_id.isin(shape_kind)]
 shapes = shapes.assign(seq=shapes.shape_pt_sequence.astype(int)).sort_values(["shape_id", "seq"])
-S_IDX, shape_rows, dense = {}, [], {}
+S_IDX, shape_rows, dense, same = {}, [], {}, {}
 n_bridge = n_tunnel = 0
 for sid, g in shapes.groupby("shape_id", sort=False):
     x, y = _utm.transform(g.shape_pt_lon.astype(float).values, g.shape_pt_lat.astype(float).values)
@@ -241,8 +254,11 @@ for sid, g in shapes.groupby("shape_id", sort=False):
             keep.append(r)
     v = np.round(np.concatenate(keep) * 10).astype(np.int64)
     flat = np.concatenate([v[:1], np.diff(v, axis=0)]).ravel()
-    S_IDX[sid] = len(shape_rows)
-    shape_rows.append(flat.tolist())
+    key = flat.tobytes()  # a new service period's copy of the same route: one shape
+    if key not in same:
+        same[key] = len(shape_rows)
+        shape_rows.append(flat.tolist())
+    S_IDX[sid] = same[key]
 print(f"{len(shape_rows)} shapes in the city; {n_bridge * STEP / 1000:.1f} km on bridges, "
       f"{n_tunnel * STEP / 1000:.1f} km in tunnels (route km, all shapes)")
 
@@ -261,7 +277,10 @@ def secs(col):
 st = st.assign(arr=secs(st.arrival_time), dep=secs(st.departure_time), ft=st.shape_dist_traveled.astype(float))
 by_trip = {tid: g for tid, g in st.groupby("trip_id", sort=False)}
 OUT.mkdir(parents=True, exist_ok=True)
-for day, (date, svc) in DAYS.items():
+for f in OUT.glob("*.json"):
+    f.unlink()  # files of an older feed
+for svc, fname in SIGS.items():
+    dates = [k for k, v in DATES.items() if v == fname]
     rows, blocks = [], {}
     for t in trips[trips.service_id.isin(svc)].itertuples():
         g = by_trip.get(t.trip_id)
@@ -282,8 +301,10 @@ for day, (date, svc) in DAYS.items():
             flat += [int(arr[i] - dep[i - 1]), int(sd[i] - sd[i - 1]), int(dep[i] - arr[i])]
         b = blocks.setdefault(t.block_id or f"trip {t.trip_id}", len(blocks))
         rows.append([R[t.route_id], S_IDX[t.shape_id], b, *flat])
-    f = OUT / f"{day}.json"
-    f.write_text(json.dumps({"date": str(date), "trips": rows}, separators=(",", ":")))
-    print(f"{day} {date}: {len(rows)} trips, {len(blocks)} vehicles, {f.stat().st_size / 2 ** 20:.1f} MB")
+    f = OUT / f"{fname}.json"
+    f.write_text(json.dumps({"dates": dates, "trips": rows}, separators=(",", ":")))
+    print(f"{fname} ({len(dates)} dates{', ' + dates[0] if dates else ''}...): {len(rows)} trips, {len(blocks)} vehicles, "
+          f"{f.stat().st_size / 2 ** 20:.1f} MB")
+(OUT / "index.json").write_text(json.dumps({"dates": DATES, "fallback": FALLBACK, "end": str(END)}, separators=(",", ":")))
 (OUT / "net.json").write_text(json.dumps({"routes": route_rows, "shapes": shape_rows}, separators=(",", ":")))
 print(f"net: {len(route_rows)} routes, {len(shape_rows)} shapes, {(OUT / 'net.json').stat().st_size / 2 ** 20:.1f} MB")
