@@ -637,10 +637,32 @@ for f in render:
 # - without one: cut where the DSM stands > 8 m over its levels, else above a house-sized footprint's 14 m (< 400 m2:
 #   80 untagged houses at 15-22 m under firs) or a larger one's 22 m (a 6-storey block is ~20 m and keeps its LiDAR),
 #   to its roof seen between branches (non-green cells), else to its levels.
+# Only house-scale buildings, though: downtown, OSM levels are often a podium's or missing and civic floors are tall,
+# so this first cut flattened the Oregon State Office Building, One Pacific Square, the Schnitzer Concert Hall and the
+# Central Library (levels=3-4 against 24-57 m) among 120 others. Neither DSM roughness (crowns 0.3-0.9 m, those roofs
+# 0.3-0.9 m) nor building type alone separates them; size does, with a little help: under 100 m2; a house, `yes` or
+# `apartments` under 250 m2 (nine storeys on 180 m2 is 2014 forest, not a block); or under 800 m2 if a house type,
+# tagged low by the import (< 10 m or <= 2 levels) or green (> 20% of the ortho), and not a named building of 150 m2+.
+# Replayed on chunks 6,4 and 3,3: East Portland keeps 1,541 of its 1,543 cuts (the two left have smooth 15-25 m
+# roofs), downtown keeps its landmarks and 120 buildings in all.
+HOUSE_TYPES = {"house", "detached", "semidetached_house", "residential", "garage", "garages", "shed", "bungalow",
+               "terrace", "cabin", "carport", "hut", "farm_auxiliary", "barn", "greenhouse", "static_caravan"}
+
+
+def house_scale(f):
+    a, b = f["area"], f["tags"].get("building")
+    h_tag, lv_tag = parse_len(f["tags"].get("height")), parse_len(f["tags"].get("building:levels"))
+    low_tag = (h_tag is not None and h_tag < 10) or (lv_tag is not None and lv_tag <= 2)
+    green = float((exg[f["rr"], f["cc"]] > 0.03).mean())
+    named = "name" in f["tags"] and a >= 150
+    return a < 100 or (a < 250 and (b in HOUSE_TYPES or b in ("yes", "apartments"))) or \
+        (a < 800 and (b in HOUSE_TYPES or low_tag or green > 0.2) and not named)
+
+
 if CITY != "warsaw":
     n_cut = n_tag = n_roof = n_lvl = n_bad = 0
     for f in render:
-        if f["part"] or f["area"] >= 3000:
+        if f["part"] or f["area"] >= 3000 or not house_scale(f):
             continue
         lv = parse_len(tag(f, "building:levels"))
         if f["maxh"] is not None and lv and lv < 5 and f["maxh"] > 3.5 * lv + 6:
