@@ -95,7 +95,9 @@ export class Daylight {
     if (!fog) return;
     const k = visibility(this.weather);
     fog.near = Math.max(2500 * k * k, dist * (0.6 + 0.45 * k));
-    fog.far = fog.near + 4500 * k;
+    // a district-sized band up close; from a citywide overview (20+ km out) the band grows with the view, so the
+    // far side of the city reads as hazy rather than gone
+    fog.far = fog.near + Math.max(4500, 1.5 * dist) * k;
   }
 
   fitShadow(focus: THREE.Vector3, camera: THREE.Camera, viewDist: number, map: THREE.Box3) {

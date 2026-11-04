@@ -113,7 +113,7 @@ def parse_colour(s):
 def parse_len(s):
     if s is None:
         return None
-    m = re.match(r"\s*(-?[0-9]+(?:[.,][0-9]+)?)", str(s))
+    m = re.match(r"\s*([-+]?[0-9]+(?:[.,][0-9]+)?)", str(s))  # "+1" is a layer OSM allows
     return float(m.group(1).replace(",", ".")) if m else None
 
 
@@ -264,7 +264,7 @@ SURF = {"asphalt": "asphalt", "paving_stones": "paving", "sett": "sett", "cobble
 
 
 def tunnelish(t):
-    return t.get("tunnel") in ("yes", "building_passage", "culvert") or parse_len(t.get("layer", 0)) < 0 \
+    return t.get("tunnel") in ("yes", "building_passage", "culvert") or (parse_len(t.get("layer")) or 0) < 0 \
         or t.get("covered") == "yes" or t.get("indoor") == "yes" or t.get("location") == "underground" \
         or parse_len(t.get("level", "0").split(";")[0] or 0) and parse_len(t.get("level", "0").split(";")[0]) < 0
 
@@ -359,7 +359,7 @@ for oid, t, line in osm.lines:
     if not hw or tunnelish(t) or hw in ("corridor", "elevator", "proposed"):
         continue
     base = hw.replace("_link", "")
-    w = parse_len(t.get("width")) or (parse_len(t.get("lanes")) * 3.1 if t.get("lanes") and base in HW and base in ROADS else None) or HW.get(base, 0)
+    w = parse_len(t.get("width")) or ((parse_len(t.get("lanes")) or 0) * 3.1 if t.get("lanes") and base in HW and base in ROADS else None) or HW.get(base, 0)
     if t.get("footway") == "sidewalk":
         w = max(w, 3)
     if base == "service" and t.get("service") in ("parking_aisle", "driveway", "alley"):
@@ -523,7 +523,7 @@ for oid, typ, t, geom in osm.areas:
     bld = t.get("building") not in (None, "no") and not part
     if not (part or bld) or t.get("building") == "construction" or t.get("location") == "underground":
         continue
-    if parse_len(t.get("layer", 0)) < 0 and not part:
+    if (parse_len(t.get("layer")) or 0) < 0 and not part:
         continue
     h = parse_len(t.get("height"))
     lv = parse_len(t.get("building:levels"))
