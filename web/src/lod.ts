@@ -47,6 +47,19 @@ export function installLod({ streamer: S, meta, camera, uniforms, focus, qs }: {
   let pxPerM = 1;
   const cellPx = (s: number, tx: number, ty: number) => s * pxPerM / Math.max(1, nodeBox(s, tx, ty).distanceToPoint(cam));
 
+  // where the map is drawn in fine detail (1-2 m voxels), one texel per 1 m node: overlays laid on the ground (street
+  // names) show only there, not over coarse blocks or ground still loading
+  const DW = S.dims[fine].nx, DH = S.dims[fine].ny, detailData = new Uint8Array(DW * DH);
+  const detail = new THREE.DataTexture(detailData, DW, DH, THREE.RedFormat, THREE.UnsignedByteType);
+  detail.magFilter = detail.minFilter = THREE.NearestFilter;
+  const markDetail = (out: TileNode[]) => {
+    detailData.fill(0);
+    for (const n of out) if (n.s <= 2) {
+      for (let y = n.ty * n.s; y < Math.min(DH, (n.ty + 1) * n.s); y++) detailData.fill(255, y * DW + n.tx * n.s, y * DW + Math.min(DW, (n.tx + 1) * n.s));
+    }
+    detail.needsUpdate = true;
+  };
+
   const get = (s: number, tx: number, ty: number) => S.nodes.get(S.key(s, tx, ty));
   const isReady = (n?: TileNode) => !!n && n.state === 'ready';
   const shown = new Set<TileNode>();
@@ -100,6 +113,7 @@ export function installLod({ streamer: S, meta, camera, uniforms, focus, qs }: {
     wanted.clear();
     const out: TileNode[] = [];
     for (const [s, tx, ty] of roots) visit(s, tx, ty, out);
+    markDetail(out);
     // level-1 nodes bring their trees and grass
     const fol: TileNode[] = [];
     for (const n of out) if (n.s === 1) {
@@ -130,6 +144,7 @@ export function installLod({ streamer: S, meta, camera, uniforms, focus, qs }: {
 
   return {
     gate: () => true,
+    detail: { tex: detail as THREE.Texture, size: [DW * N * fine, DH * N * fine] as [number, number] },
     get complete() { return rootsIn === roots.length; },
   };
 }

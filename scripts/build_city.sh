@@ -1,7 +1,7 @@
 #!/bin/sh
 # Citywide build: Portland in 4096 m chunks (scripts/city_grid.py), each built by scripts/build_chunk.sh into the one
 # tile pyramid in web/public/data/tiles, JOBS at a time (default 2: a chunk peaks at ~8-9 GB, more in the West Hills,
-# on a 36 GB machine), then merged (scripts/merge_chunks.py). Chunks share one palette, merged under a lock at export.
+# on a 36 GB machine), then merged (scripts/merge_chunks.py) and the street names placed (scripts/streets.py). Chunks share one palette, merged under a lock at export.
 # A chunk with a part.json is skipped unless REBUILD=1; a failed chunk does not stop the others.
 #
 # usage: sh scripts/build_city.sh                    every chunk with any city-limits land
@@ -41,5 +41,6 @@ echo "building $n chunks, $JOBS at a time: $TODO"
 status=0
 printf '%s\n' $TODO | xargs -P "$JOBS" -I{} sh scripts/build_chunk.sh {} || status=$?
 uv run python scripts/merge_chunks.py
+uv run --with osmium python scripts/streets.py  # street names along the streets, over the merged city
 uv run python scripts/climate.py
 [ $status -eq 0 ] || { echo "some chunks failed: see data/debug/build_c*.log"; exit $status; }

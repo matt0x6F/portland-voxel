@@ -10,6 +10,7 @@ import { loadWindows } from './windows';
 import { Fountains } from './fountains';
 import { Hud } from './hud';
 import { Labels } from './labels';
+import type { Detail, Streets } from './streets';
 import { Nav, type Mode, type Ride } from './nav/nav';
 import { makePost } from './post';
 import type { SearchItem } from './search';
@@ -60,9 +61,10 @@ const map = new THREE.Box3();
 const tiltShift = qs.get('tilt') !== '0' && innerWidth >= 600 && (engine === 'city' || qs.get('tilt') === '1');
 let world: World | null = null, labels: Labels | null = null, hud: Hud | null = null;
 let life: StreetLife | null = null, flood: Flood | null = null, fountains: Fountains | null = null;
-let city: { gate: (x: number, z: number) => boolean; readonly complete: boolean } | null = null;
+let city: { gate: (x: number, z: number) => boolean; readonly complete: boolean; detail?: Detail } | null = null;
 let uniforms: ReturnType<typeof makeUniforms> | null = null, streamer: TileStreamer | null = null, views: Record<string, View> = {};
 let fly: ((now: number) => void) | null = null;
+let streets: Streets | null = null;
 let barRect: DOMRect | null = null;
 let climate: Climate | null = null;
 let setWindows: ((hour: number, day: number) => void) | null = null;
@@ -298,6 +300,11 @@ async function boot() {
     city = await installCity({ streamer, uniforms: uniforms as typeof uniforms & BuildUniforms, meta, scene, focus, camera, caption: new Caption() });
   }
   labels = new Labels(meta.labels, onLabel);
+  // street names on the streets (scripts/streets.py): the citywide map only; ?streets=0 leaves them off
+  if (engine === 'lod' && qs.get('streets') !== '0') {
+    import('./streets').then((m) => m.loadStreets(scene, renderer.capabilities.getMaxAnisotropy(), city?.detail))
+      .then((s) => { streets = s; }).catch((e) => console.warn('streets', e));
+  }
   if (city) labels.gate = city.gate;
   hud = new Hud(renderer.domElement, nav.mode);
   bar.search.setItems(searchItems(meta));
@@ -352,6 +359,7 @@ renderer.setAnimationLoop((now) => {
   setWindows?.(daylight.hour, daylight.day);
   fountains?.update(t, daylight.night);
   precip.update(t, camera.position, daylight.weather, daylight.night);
+  streets?.update(camera, daylight.night);
   if (city?.complete) document.body.classList.remove('loading');
   if (life) {
     life.group.visible = !city || city.complete;

@@ -4,6 +4,7 @@ Output web/public/data/places.json: {"places": [[name, kind, x, y, size, alt], .
 (x east, y south), size = a rough extent in metres used to frame the camera. Sorted by importance.
 """
 import json
+import os
 from collections import defaultdict
 from pathlib import Path
 
@@ -21,6 +22,10 @@ PL_KIND = {"place of worship": "kościół church", "station": "dworzec stacja",
            "museum": "muzeum", "gallery": "galeria", "library": "biblioteka", "university": "uczelnia uniwersytet",
            "park": "ogród", "square": "plac", "street": "ulica", "cinema": "kino", "hotel": "hotel", "memorial": "pomnik",
            "artwork": "rzeźba", "restaurant": "restauracja", "cafe": "kawiarnia", "school": "szkoła", "hospital": "szpital"}
+
+
+if os.environ.get("CITY") == "portland":
+    PL_KIND = {}  # Warsaw's search words for each kind; Portland's names are English already
 
 
 def inside(x, y):
