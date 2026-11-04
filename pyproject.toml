@@ -5,7 +5,7 @@ requires-python = ">=3.13"
 dependencies = [
     "laspy[lazrs]>=2.6",
     "numpy>=2.5.4",
-    "pillow>=12.3.0",
+    "pillow>=13.0.0",
     "pyproj>=3.8.0",
     "rasterio>=1.5.2",
     "requests>=2.34.2",
