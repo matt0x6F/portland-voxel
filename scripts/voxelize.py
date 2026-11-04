@@ -273,7 +273,10 @@ containers, soft, hard = [], [], []
 for oid, typ, t, geom in osm.areas:
     if tunnelish(t) or "building" in t or "building:part" in t:
         continue
-    if t.get("place") == "square" or t.get("highway") == "pedestrian" or t.get("landuse") in ("commercial", "retail", "residential"):
+    # central Warsaw's residential blocks are paved courtyards; Portland's landuse=residential is whole neighbourhoods
+    # of houses with yards, so there it claims nothing and the ortho decides (below)
+    paved_landuse = ("commercial", "retail", "residential") if CITY == "warsaw" else ("commercial", "retail")
+    if t.get("place") == "square" or t.get("highway") == "pedestrian" or t.get("landuse") in paved_landuse:
         containers.append((geom, C[SURF.get(t.get("surface"), "paving")]))
     if t.get("landuse") in LANDUSE:
         soft.append((geom, C[LANDUSE[t["landuse"]]]))
@@ -296,10 +299,44 @@ parking_mask = np.zeros((D, W), np.uint16)
 burn(parking_mask, [(geom, 1) for geom, _ in hard])
 
 # ortho says grass where OSM is silent (cross-check, only on default paving cells, low & green)
-ortho_grass = (gcol == C["paving"]) & (exg > 0.09) & (nd_mean < 0.8)
-ortho_grass = ndimage.binary_opening(ortho_grass, iterations=1)
-gcol[ortho_grass] = C["grass"]
-note("ortho-detected grass cells (OSM silent):", int(ortho_grass.sum()))
+if CITY == "warsaw":
+    ortho_grass = (gcol == C["paving"]) & (exg > 0.09) & (nd_mean < 0.8)
+    ortho_grass = ndimage.binary_opening(ortho_grass, iterations=1)
+    gcol[ortho_grass] = C["grass"]
+    note("ortho-detected grass cells (OSM silent):", int(ortho_grass.sum()))
+else:
+    # East Portland: ground no OSM area claims is yard, not pavement, unless the ortho says so. On the seam tile
+    # (SE 136th, the 2022 ortho, flown in summer at midday) the low ground was 52% green, 11% deep tree shadow, 2% tan
+    # and 35% neutral grey (roads, driveways, an untagged lot): only that grey is paved -- asphalt when mid-grey (the
+    # lot), light paving when pale (concrete drives, walks). A tree's shadow is whatever it falls on: each shadowed
+    # cell takes the class of the nearest unshadowed ground (a first pass made every shadow lawn: green flecks across
+    # the lot). Roads and tagged lots are burned over all this anyway. 61% of the cells stand under canopy: their
+    # ground (seen past a trimmed crown, or at an angle) is undergrowth, not the paving it defaulted to.
+    # (underscored: this script is one flat namespace, and `lum` is already the ortho's luma for roof colours)
+    _claim = np.zeros((D, W), np.uint16)
+    burn(_claim, [(geom, 1) for geom, _ in containers + soft + hard])
+    _free = _claim == 0
+    _mean = cellcol.sum(-1) / 3
+    _warm = (cellcol[..., 0] - cellcol[..., 2]) / np.maximum(cellcol.sum(-1), 1)
+    _low = nd_mean < 0.8
+    _shade = _low & (_mean < 80) & (exg <= 0.03)
+    _lawn = _low & ~_shade & ((exg > 0.03) | (_warm > 0.06))
+    _paved = _low & ~_shade & ~_lawn
+    _, (_ir, _ic) = ndimage.distance_transform_edt(~(_lawn | _paved), return_indices=True)
+    _lawn |= _shade & _lawn[_ir, _ic]
+    _paved |= _shade & _paved[_ir, _ic]
+    del _ir, _ic
+    _lawn &= _free
+    _lawn = ndimage.binary_opening(_lawn, iterations=1) | (_free & _low & (exg > 0.06))  # specks go, clear green stays
+    _paved &= _free & ~_lawn
+    _dark = _paved & (_mean < 150)
+    _under = _free & ~_low
+    gcol[_lawn] = C["grass"]
+    gcol[_dark] = C["asphalt_l"]
+    gcol[_under] = C["garden"]
+    note("yards from the ortho (OSM silent): lawn", int(_lawn.sum()), "| under canopy or roofs", int(_under.sum()),
+         "| paved: asphalt", int(_dark.sum()), "light", int((_paved & ~_dark).sum()), "| shaded cells", int(_shade.sum()))
+    del _claim, _free, _mean, _warm, _low, _shade, _lawn, _paved, _dark, _under
 
 HW = {"motorway": 20, "trunk": 14, "primary": 12, "secondary": 10, "tertiary": 8, "unclassified": 6,
       "residential": 6, "living_street": 5, "service": 4, "pedestrian": 5, "footway": 2.5, "path": 2,
