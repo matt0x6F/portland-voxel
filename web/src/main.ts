@@ -332,12 +332,16 @@ async function boot() {
     ...places.map(([name, kind, x, y, size, alt]) => ({ name, alt, kind, go: () => goPlace(x, y, size, { name, kind }) }))]));
   fountains = new Fountains(scene, meta.jets ?? []);
   flood = new Flood(scene, uniforms, meta);
-  flood.load().then(() => { bar.river.input.disabled = false; flood!.setGauge(RIVER.typical); }).catch((e) => console.warn('flood', e));
-  fetchJson<TrafficData>(dataUrl('traffic.json')).then((td) => {
-    life = nav.life = new StreetLife(scene, td);
-    life.world = world;
-    window.__life = life;
-  }).catch((e) => console.warn('traffic', e)); // none for the citywide map yet
+  // the river gauge and street life exist for a district map only (scripts/flood.py, traffic.py): the citywide map
+  // doesn't ask for files it doesn't have (each would be a 404 in the console)
+  if (engine !== 'lod') {
+    flood.load().then(() => { bar.river.input.disabled = false; flood!.setGauge(RIVER.typical); }).catch((e) => console.warn('flood', e));
+    fetchJson<TrafficData>(dataUrl('traffic.json')).then((td) => {
+      life = nav.life = new StreetLife(scene, td);
+      life.world = world;
+      window.__life = life;
+    }).catch((e) => console.warn('traffic', e));
+  }
   $('#loading').classList.add('hidden');
   window.__streamer = streamer;
   window.__ready = true;
