@@ -40,7 +40,9 @@ export interface ZoneUniforms {
   uZBlk: U<THREE.Texture>; uZBld: U<THREE.Texture>; uZFBlk: U<THREE.Texture>; uZFBld: U<THREE.Texture>;
   uZMode: U<number>; uZFocus: U<THREE.Vector2>; uZRad: U<number>;
 }
-export type Engine = 'city' | 'zones';
+// city: the whole map at 1 m, revealed building by building; zones: phones; lod: the citywide map, streamed by
+// distance (lod.ts), plain voxels with no reveal or zone uniforms
+export type Engine = 'city' | 'zones' | 'lod';
 
 const tiny = (format: THREE.PixelFormat, data: Uint8Array | Uint16Array, type?: THREE.TextureDataType) => dataTexture(data, 1, 1, format, type);
 
@@ -71,6 +73,7 @@ export function makeUniforms(meta: Meta, engine: Engine): VoxelUniforms & Partia
     uAlbedo: { value: 0.7 },
     uPkinLight: { value: new THREE.Color(0.95, 0.74, 0.4) },
   };
+  if (engine === 'lod') return base;
   if (engine === 'city') return { ...base, uStage: { value: 0 }, uBldOn: { value: tiny(THREE.RedFormat, new Uint8Array(1)) } };
   const ids = () => tiny(THREE.RedIntegerFormat, new Uint16Array(1), THREE.UnsignedShortType);
   return { ...base, uZBlk: { value: ids() }, uZBld: { value: ids() }, uZFBlk: { value: tiny(THREE.RedFormat, new Uint8Array(1)) },
@@ -85,9 +88,10 @@ function makePaletteTexture(palette: Meta['palette']) {
   return tex;
 }
 
-// warm pools of street light on the ground (2 m texels), and an even wash over floodlit pitches
+// warm pools of street light on the ground (2 m texels; coarser on a map over 8 km, so the canvas stays <= 4096 px:
+// at 2 m the citywide map's would be 14848 x 12800, ~760 MB), and an even wash over floodlit pitches
 function makeLampTexture(meta: Meta) {
-  const s = 0.5, cv = document.createElement('canvas');
+  const s = Math.min(0.5, 4096 / Math.max(meta.W, meta.D)), cv = document.createElement('canvas');
   cv.width = meta.W * s; cv.height = meta.D * s;
   const ctx = cv.getContext('2d')!;
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, cv.width, cv.height);

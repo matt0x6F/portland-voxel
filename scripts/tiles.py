@@ -167,6 +167,76 @@ def export(vol, g, out, note, keep_ids=(), skip_ids=(), face_ids=(), fol_ids=(),
     return info
 
 
+def export_chunk(vol, g, out, core, origin, dz, note, keep_ids=(), skip_ids=(), face_ids=(), fol_ids=(), grass_ids=(),
+                 bare_id=0):
+    """The nodes (every level) over one chunk's core, named by their index in the city grid (scripts/city_grid.py).
+
+    core = (r0, c0, rows, cols): the core in the chunk's window (the window is the core plus a margin, so each node's
+    1-cell apron holds the neighbouring chunk's real voxels and the seams cull and shade like any other node edge).
+    origin = (gy, gx): the core's corner in city metres, a multiple of the coarsest node span.
+    dz: the chunk's base above the city's, a multiple of 8 m, added to every z -- one vertical datum for all chunks,
+    while each chunk's volume only spans its own heights; the coarse levels' z-blocks stay aligned across chunks.
+    Returns the levels' node counts over the core, for the merge (scripts/merge_chunks.py)."""
+    H, D, W = vol.shape
+    R0, C0, NR, NC = core
+    gy, gx = origin
+    big = N * max(LEVELS)
+    assert dz % max(LEVELS) == 0 and gy % big == 0 and gx % big == 0 and NR % big == 0 and NC % big == 0, \
+        (dz, origin, core)
+    assert R0 >= max(LEVELS) and C0 >= max(LEVELS) and R0 + NR + max(LEVELS) <= D and C0 + NC + max(LEVELS) <= W, \
+        "the margin must hold every level's apron"
+    face = np.array(sorted(face_ids), np.uint16)
+    fol = np.zeros(65536, bool); fol[list(fol_ids)] = True; fol[list(grass_ids)] = True
+    grass = np.zeros(65536, bool); grass[list(grass_ids)] = True
+    info = dict(N=N, levels=[], bytes=0)
+    for s in LEVELS:
+        span = N * s
+        (out / str(s)).mkdir(parents=True, exist_ok=True)
+        if s == 1 and len(fol_ids):
+            (out / "1f").mkdir(parents=True, exist_ok=True)
+        tot = nruns = ndet = 0
+        for ky in range(NR // span):
+            for kx in range(NC // span):
+                a, c = R0 + ky * span - s, C0 + kx * span - s  # 1 m window: the node and its one-cell apron
+                ty, tx = gy // span + ky, gx // span + kx      # the node's index in the city grid
+                w1 = vol[:, a:a + span + 2 * s, c:c + span + 2 * s]
+                win = w1 if s == 1 else downsample(w1, s, face)
+                gw = np.clip(g[a:a + span + 2 * s:s, c:c + span + 2 * s:s].astype(np.int32) + dz, 0, 255).astype(np.uint8)
+                Hs = win.shape[0]
+                top = int(np.nonzero(win.reshape(Hs, -1).any(1))[0].max()) + 1 if win.any() else 1
+                win = win[:top]
+                if s == 1 and len(fol_ids):
+                    f = fol[win]
+                    fv = np.where(f, win, 0).astype(np.uint16)
+                    win = np.where(f, np.where(grass[win], bare_id, 0), win).astype(np.uint16)
+                    fc, fr = column_runs(fv)
+                    fr[:, 0] += dz
+                    with gzip.GzipFile(out / "1f" / f"{tx}_{ty}.bin", "wb", compresslevel=9, mtime=0) as fh:
+                        fh.write(fc.tobytes() + gw.tobytes() + fr.tobytes())
+                    tot += (out / "1f" / f"{tx}_{ty}.bin").stat().st_size
+                counts, runs = column_runs(win)
+                runs[:, 0] += dz // s
+                blob = counts.tobytes() + gw.tobytes() + runs.tobytes()
+                if 1 < s < 8:
+                    tz, tr, tc, tv = thin_voxels(np.ascontiguousarray(w1), skip_ids, keep_ids, lambda *x: None)
+                    k = (tr >= s) & (tr < s + span) & (tc >= s) & (tc < s + span)
+                    tz, tr, tc, tv = tz[k], tr[k], tc[k], tv[k]
+                    lost = win[np.minimum(tz // s, win.shape[0] - 1), tr // s, tc // s] == 0 if len(tz) else k[:0]
+                    lost |= (tz // s) >= win.shape[0]
+                    det = np.stack([tc[lost] - s, tr[lost] - s, tz[lost] + dz, tv[lost]], 1).astype(np.uint16)
+                    blob += det.tobytes()
+                    ndet += len(det)
+                with gzip.GzipFile(out / str(s) / f"{tx}_{ty}.bin", "wb", compresslevel=9, mtime=0) as fh:
+                    fh.write(blob)
+                tot += (out / str(s) / f"{tx}_{ty}.bin").stat().st_size
+                nruns += len(runs)
+        info["levels"].append(dict(s=s, nx=NC // span, ny=NR // span))
+        info["bytes"] += tot
+        note(f"chunk tiles level {s}: {NC // span}x{NR // span} nodes, {nruns} runs, {ndet} detail voxels, "
+             f"{tot / 2 ** 20:.1f} MB gz")
+    return info
+
+
 def export_region(vol, g, out, box, note, keep_ids=(), skip_ids=(), face_ids=(), fol_ids=(), grass_ids=(), bare_id=0):
     """Rewrite only the nodes (every level) over box = (r0, r1, c0, c1) of the 1 m grid, from the same volume the
     full export would see (scripts/patch.py); each node is built from its own 1 m window, so the result matches

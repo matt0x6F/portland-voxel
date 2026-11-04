@@ -36,7 +36,7 @@ const TODAY = dayOfYear(new Date());
 const DAYS = { midsummer: 172, midwinter: 355, today: TODAY };
 
 const qs = new URLSearchParams(location.search);
-const engine = pickEngine();
+let engine: Engine = pickEngine(); // 'lod' once a citywide meta (meta.chunks) has loaded, on any device
 const renderer = makeRenderer();
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(28, innerWidth / innerHeight, 0.5, 9000);
@@ -52,7 +52,7 @@ const map = new THREE.Box3();
 const tiltShift = qs.get('tilt') !== '0' && innerWidth >= 600 && (engine === 'city' || qs.get('tilt') === '1');
 let world: World | null = null, labels: Labels | null = null, hud: Hud | null = null;
 let life: StreetLife | null = null, flood: Flood | null = null, fountains: Fountains | null = null;
-let city: Awaited<ReturnType<typeof installCity>> | null = null;
+let city: { gate: (x: number, z: number) => boolean; readonly complete: boolean } | null = null;
 let uniforms: ReturnType<typeof makeUniforms> | null = null, streamer: TileStreamer | null = null, views: Record<string, View> = {};
 let fly: ((now: number) => void) | null = null;
 let barRect: DOMRect | null = null;
@@ -250,10 +250,19 @@ async function boot() {
   let meta: Meta;
   [meta, climate] = await Promise.all([fetchJson<Meta>('data/meta.json'), fetchJson<Climate>('data/climate.json')]);
   views = meta.views;
+  if (meta.chunks) {
+    // the citywide map: streamed by distance, and seen from far enough to need a longer view than one district
+    engine = 'lod';
+    camera.far = Math.max(camera.far, 1.5 * Math.max(meta.W, meta.D));
+    camera.updateProjectionMatrix();
+    controls.maxDistance = Math.max(controls.maxDistance, 0.9 * Math.max(meta.W, meta.D));
+  }
   uniforms = makeUniforms(meta, engine);
-  loadFoliage(meta, uniforms).then((city) => bar.setDays({ 'leaves out': city.leaf, 'trees in colour': city.colour, 'leaves down': city.fall, ...DAYS }))
-    .catch((e) => console.warn('foliage', e));
-  loadWindows(meta, uniforms).then((set) => { setWindows = set; }).catch((e) => console.warn('windows', e));
+  if (engine !== 'lod') { // map-sized layers: one texture over the whole map, which a city does not fit
+    loadFoliage(meta, uniforms).then((city) => bar.setDays({ 'leaves out': city.leaf, 'trees in colour': city.colour, 'leaves down': city.fall, ...DAYS }))
+      .catch((e) => console.warn('foliage', e));
+    loadWindows(meta, uniforms).then((set) => { setWindows = set; }).catch((e) => console.warn('windows', e));
+  }
   streamer = new TileStreamer(meta, makeVoxelMaterial(uniforms), scene);
   world = nav.world = streamer.world;
   nav.streamer = streamer;
@@ -269,7 +278,9 @@ async function boot() {
   setDay(md ? dayOfYear(new Date(new Date().getFullYear(), md[0] - 1, md[1])) : TODAY);
   setWeather((qs.get('weather') ?? '') in WEATHERS ? qs.get('weather')! : 'typical', true);
   setHour(qs.get('hour') ? +qs.get('hour')! : timesOf(daylight.day)['golden hour']);
-  if (engine === 'zones') {
+  if (engine === 'lod') {
+    city = (await import('./lod')).installLod({ streamer, meta, camera, uniforms, focus, qs });
+  } else if (engine === 'zones') {
     await (await import('./zones')).installZones({ streamer, uniforms: uniforms as typeof uniforms & ZoneUniforms, meta, focus, qs, composer: post.composer, n8: post.n8, camera });
     document.body.classList.remove('loading');
   } else {
@@ -288,7 +299,7 @@ async function boot() {
     life = nav.life = new StreetLife(scene, td);
     life.world = world;
     window.__life = life;
-  });
+  }).catch((e) => console.warn('traffic', e)); // none for the citywide map yet
   $('#loading').classList.add('hidden');
   window.__streamer = streamer;
   window.__ready = true;

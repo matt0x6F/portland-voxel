@@ -10,7 +10,7 @@ import math
 import numpy as np
 from shapely.geometry import Polygon
 
-from aoi import D, W
+from aoi import CHUNK_INFO, D, W
 
 MAT_IDS = {"solid": 0, "wall": 1, "glass": 2, "metal": 6, "pkin": 7, "grass": 8, "roof": 12, "concrete": 13,
            "bronze_grid": 15, "sign": 16, "sign_band": 18, "ribbon": 19, "classic": 20, "window": 21, "tenement": 22}
@@ -106,6 +106,7 @@ def details(vol, g, top, topi, bmask, feats, pal, C, osm, cells_of, note, leaf_i
         return int(col[-1]) + 1 if len(col) else int(g[r, c])
 
     best = {}  # name -> (area, kind, geom): OSM often maps a park and its protected_area under one name
+    full_geom = {}  # name -> the whole polygon of the one kept in best
     for oid, typ, tags, geom in osm.areas:
         name, kind = tags.get("name"), green_kind(tags)
         if not name or not kind:
@@ -115,11 +116,16 @@ def details(vol, g, top, topi, bmask, feats, pal, C, osm, cells_of, note, leaf_i
             continue
         if name not in best or inside.area > best[name][0]:
             best[name] = (inside.area, kind, inside, geom.area)
+            full_geom[name] = geom
 
     labels = []
     for name, (area, kind, geom, full) in best.items():
-        p = geom.representative_point()
+        # chunk mode: the whole park's point, so a park across a seam is labelled once, by the chunk whose core holds
+        # it (voxelize.py drops what lies in the margin); else the point of what lies on the map
+        p = (full_geom[name] if CHUNK_INFO else geom).representative_point()
         x, y = int(p.x), int(p.y)
+        if not (0 <= x < W and 0 <= y < D):
+            continue
         acres = full / ACRE
         far = 9000 if full >= 100 * ACRE else 5000 if full >= 10 * ACRE else 1800
         labels.append(dict(name=name, kind=f"{kind} · {acres:,.0f} acres" if acres >= 2 else kind,

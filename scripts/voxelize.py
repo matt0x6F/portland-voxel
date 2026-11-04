@@ -22,8 +22,16 @@ from shapely.geometry import LineString, Point
 from shapely.ops import substring
 from shapely.strtree import STRtree
 
-from aoi import CX, CY, D, EPSG, THETA, W
+from aoi import CHUNK_INFO, CX, CY, D, EPSG, NAME, THETA, W
 from osm import OSM
+
+# Chunk mode (CHUNK=cx,cy, scripts/aoi.py): one piece of the citywide map. Its tiles go straight into the city's
+# pyramid under their city indices; everything else (labels, lamps, trams...) into data/chunks/<name>/part.json for
+# scripts/merge_chunks.py. All chunks share one palette, grown chunk by chunk (they are built one at a time), and one
+# vertical datum, CITY_BASE metres: below the lowest ground anywhere in Portland (the rivers, ~2-5 m NAVD88).
+CHUNKS = Path("data/chunks")
+PALETTE_FILE = CHUNKS / "palette.json"
+CITY_BASE = -8
 
 # CITY=warsaw keeps the upstream curated landmarks; Portland swaps in its own module under the same name, so
 # labels.py and patch.py (which `import landmarks`) see it too
@@ -52,9 +60,10 @@ M_SOLID, M_WALL, M_GLASS, M_LEAF, M_WATER, M_LAMP, M_METAL, M_PKIN, M_GRASS, M_M
 
 
 class Palette:
-    def __init__(self):
-        self.entries = [(0, 0, 0, 0)]
-        self.index = {}
+    def __init__(self, entries=None):
+        """entries: a palette to continue (chunk mode), so its indices mean the same in every chunk."""
+        self.entries = [tuple(e) for e in entries] if entries else [(0, 0, 0, 0)]
+        self.index = {e: i for i, e in enumerate(self.entries) if i}
 
     def __call__(self, rgb, mat=M_SOLID, q=4):
         if isinstance(rgb, str):
@@ -117,7 +126,7 @@ def stable_hash(*a):
     return int(hashlib.md5("/".join(map(str, a)).encode()).hexdigest()[:8], 16)
 
 
-pal = Palette()
+pal = Palette(json.load(open(PALETTE_FILE)) if CHUNK_INFO and PALETTE_FILE.exists() else None)
 C = {  # ground & misc palette (MagicaVoxel-like pastel)
     "paving": pal("#c6c2b8"), "paving2": pal("#b5b4af"), "asphalt": pal("#5f636b"), "asphalt_l": pal("#6e7178"),
     "sett": pal("#8f8981"), "concrete": pal("#bdbab2"), "cycle": pal("#8a5a52"), "gravel": pal("#d8ccb5"),
@@ -149,6 +158,12 @@ dsm_mean = d4.mean((1, 3))
 dtm_s = ndimage.uniform_filter(dtm, 3)
 SLAB = 3
 BASE = math.floor(dtm.min()) - SLAB
+DZ = 0  # this volume's base above the city's datum (chunk mode), in metres
+if CHUNK_INFO:
+    assert BASE >= CITY_BASE, f"ground at {dtm.min():.1f} m: lower CITY_BASE ({CITY_BASE})"
+    DZ = (BASE - CITY_BASE) // 8 * 8  # a multiple of the coarsest level, so its z-blocks align across chunks
+    BASE = CITY_BASE + DZ
+    note(f"chunk {NAME}: base {BASE} m = city datum {CITY_BASE} + {DZ}")
 
 
 def ground_walls(dtm, dtm_s):
@@ -1799,7 +1814,12 @@ debris.support_floating(vol, g, pal, bkind, note, C["trunk"], C["pole"], trunk_o
 if os.environ.get("FINALDUMP"):  # the finished volume, for whole-city checks (scripts/floating.py)
     np.save("data/cache/final_vol.npy", vol)
     np.save("data/cache/final_g.npy", g)
-tile_info = tiles.export(vol, g, OUT / "tiles", note, **EXPORT_IDS)
+if CHUNK_INFO:
+    _ci = CHUNK_INFO
+    tile_info = tiles.export_chunk(vol, g, OUT / "tiles", _ci["core"], (_ci["cy"] * _ci["chunk"], _ci["cx"] * _ci["chunk"]),
+                                   DZ, note, **EXPORT_IDS)
+else:
+    tile_info = tiles.export(vol, g, OUT / "tiles", note, **EXPORT_IDS)
 if os.environ.get("LMCACHE"):
     pickle.dump(dict(EXPORT_IDS, debris_keep=[i for i, e in enumerate(pal.entries) if e[3] == M_LEAF] + [C["trunk"]]),
                 open("data/cache/export_ids.pkl", "wb"))
@@ -1819,6 +1839,35 @@ for ln in sorted(tram_lines, key=lambda l: -l.length):
         path.append([round(p.x, 1), round(p.y, 1), int(g[r, c])])
     trams.append(path)
 note("tram paths:", len(trams), "total km", round(sum(len(p) for p in trams) * 2 / 1000, 2))
+if CHUNK_INFO:
+    # this chunk's share of the city meta, in city coordinates (x + off_i, y + off_j, z + DZ), only what lies over its
+    # core (the margin belongs to the neighbours); scripts/merge_chunks.py joins the parts
+    _ci = CHUNK_INFO
+    _r0, _c0, _nr, _nc = _ci["core"]
+    oi, oj = _ci["off_i"], _ci["off_j"]
+    in_core = lambda x, y: _c0 <= x < _c0 + _nc and _r0 <= y < _r0 + _nr
+    part = dict(
+        name=NAME, cx=_ci["cx"], cy=_ci["cy"], core=[_ci["cx"] * _ci["chunk"], _ci["cy"] * _ci["chunk"], _nc, _nr],
+        top=int(Hm + DZ), base=BASE, dz=DZ, tiles=tile_info, sources=dict(
+            osm=osm.timestamp, lidar=f"Oregon Lidar Consortium Metro {os.environ.get('LIDAR', '2014')} (DOGAMI / NOAA Digital Coast)",
+            ortho="Oregon Statewide Imagery Program 2022, 1 ft"),
+        lamps=[[c + oi, r + oj, z + DZ] for c, r, z in lamps if in_core(c, r)],
+        jets=[[x + oi, z + DZ, y + oj] for x, z, y in jets if in_core(x, y)],
+        labels=[dict(l, x=l["x"] + oi, y=l["y"] + oj, z=l["z"] + DZ, g=l.get("g", 0) + DZ) for l in labels
+                if in_core(l["x"], l["y"])],
+        views={k: dict(v, target=[v["target"][0] + oi, v["target"][1] + DZ, v["target"][2] + oj],
+                       pos=[v["pos"][0] + oi, v["pos"][1] + DZ, v["pos"][2] + oj])
+               for k, v in views.items() if k != "overview" and in_core(v["target"][0], v["target"][2])},
+        trams=[[[x + oi, y + oj, z + DZ] for x, y, z in p] for p in trams],
+        ground=[int(np.percentile(g[_r0:_r0 + _nr, _c0:_c0 + _nc], q)) + DZ for q in (5, 50, 95)],
+    )
+    (CHUNKS / NAME).mkdir(parents=True, exist_ok=True)
+    json.dump(part, open(CHUNKS / NAME / "part.json", "w"), separators=(",", ":"))
+    json.dump([list(e) for e in pal.entries], open(PALETTE_FILE, "w"))
+    json.dump(report, open(CHUNKS / NAME / "report.json", "w"), indent=1, ensure_ascii=False)
+    note(f"chunk {NAME}: part.json written; palette now {len(pal.entries)} entries")
+    print("done")
+    sys.exit(0)
 meta = dict(W=W, D=D, H=Hm, base=BASE, tiles=tile_info, center=[CX, CY], theta_deg=math.degrees(THETA), crs=f"EPSG:{EPSG}", trams=trams, jets=jets,
             palette=[list(e) for e in pal.entries], lamps=lamps, floods=floods, labels=labels, views=views,
             sources=dict(osm=osm.timestamp, lidar="GUGiK NMPT/NMT 2025 (GK-FOTO.6201.5.2025)",

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from shapely.ops import unary_union
 
-from aoi import W, D
+from aoi import CHUNK_INFO, NAME, W, D
 from osm import OSM
 from wikidata import CACHE
 
@@ -110,6 +110,12 @@ if domki:
     print(len(domki), "Finnish houses on Jazdów")
 
 places = sorted(best.values(), key=lambda r: (RANK.get(r[1], 6), -r[4]))
+if CHUNK_INFO:  # this chunk's places over its core, in city metres, for scripts/merge_chunks.py
+    r0, c0, nr, nc = CHUNK_INFO["core"]
+    places = [[p[0], p[1], p[2] + CHUNK_INFO["off_i"], p[3] + CHUNK_INFO["off_j"], *p[4:]] for p in places
+              if c0 <= p[2] < c0 + nc and r0 <= p[3] < r0 + nr]
+    OUT = Path("data/chunks") / NAME / "places.json"
+    OUT.parent.mkdir(parents=True, exist_ok=True)
 OUT.write_text(json.dumps({"places": places}, ensure_ascii=False, separators=(",", ":")))
 kinds = defaultdict(int)
 for r in places:

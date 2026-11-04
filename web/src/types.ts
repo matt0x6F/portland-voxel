@@ -49,6 +49,9 @@ export interface Meta {
   labels: Label[];
   views: Record<string, View>;
   sources: { osm: string };
+  // the citywide map (scripts/merge_chunks.py): the built chunks' cores, [x, y, w, h] in metres; their presence
+  // selects the streaming LOD engine (lod.ts), and only nodes over them are requested
+  chunks?: [number, number, number, number][];
 }
 
 export interface FloodInfo {
