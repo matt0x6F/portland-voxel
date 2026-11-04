@@ -86,6 +86,27 @@ class CityGround:
         return out
 
 
+def simplify3(p, tol=0.3):
+    """Douglas-Peucker on the first three columns: a straight, even street keeps its ends; a hill keeps where its
+    slope changes. Rows are kept whole (extra columns ride along)."""
+    keep = np.zeros(len(p), bool)
+    keep[[0, -1]] = True
+    stack = [(0, len(p) - 1)]
+    while stack:
+        a, b = stack.pop()
+        if b - a < 2:
+            continue
+        ab = p[b, :3] - p[a, :3]
+        L = np.linalg.norm(ab) or 1.0
+        ap = p[a + 1:b, :3] - p[a, :3]
+        d = np.linalg.norm(np.cross(ap, ab / L), axis=1)
+        k = int(np.argmax(d))
+        if d[k] > tol:
+            keep[a + 1 + k] = True
+            stack += [(a, a + 1 + k), (a + 1 + k, b)]
+    return p[keep]
+
+
 if __name__ == "__main__":
     # the DTM fallback against the saved ground, in a chunk that has both
     gz = CityGround()

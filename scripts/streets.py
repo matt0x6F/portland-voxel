@@ -26,7 +26,7 @@ from shapely import STRtree
 from shapely.geometry import LineString, MultiLineString
 from shapely.ops import linemerge, unary_union
 
-from cityground import GRID, CityGround, city_to_utm, utm_to_city
+from cityground import GRID, CityGround, city_to_utm, simplify3, utm_to_city
 
 PBF = Path("data/raw/geofabrik/oregon-latest.osm.pbf")
 OUT = Path("web/public/data/streets.json")
@@ -136,26 +136,6 @@ def chains(lines):
 def heading(p):
     d = np.diff(p[:, :2], axis=0)
     return np.unwrap(np.arctan2(d[:, 1], d[:, 0]))
-
-
-def simplify3(p, tol=0.3):
-    """Douglas-Peucker in 3D: a straight, even street keeps its ends; a hill keeps where its slope changes."""
-    keep = np.zeros(len(p), bool)
-    keep[[0, -1]] = True
-    stack = [(0, len(p) - 1)]
-    while stack:
-        a, b = stack.pop()
-        if b - a < 2:
-            continue
-        ab = p[b] - p[a]
-        L = np.linalg.norm(ab) or 1.0
-        ap = p[a + 1:b] - p[a]
-        d = np.linalg.norm(np.cross(ap, ab / L), axis=1)
-        k = int(np.argmax(d))
-        if d[k] > tol:
-            keep[a + 1 + k] = True
-            stack += [(a, a + 1 + k), (a + 1 + k, b)]
-    return p[keep]
 
 
 # ---------------------------------------------------------------- place

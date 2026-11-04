@@ -11,6 +11,7 @@ import { Fountains } from './fountains';
 import { Hud } from './hud';
 import { Labels } from './labels';
 import type { Detail, Streets } from './streets';
+import type { Transit } from './transit';
 import { Nav, type Mode, type Ride } from './nav/nav';
 import { makePost } from './post';
 import type { SearchItem } from './search';
@@ -27,7 +28,7 @@ import { makeUniforms, makeVoxelMaterial, type BuildUniforms, type Engine, type 
 import './style.css';
 
 declare global {
-  interface Window { __ready?: boolean; __three?: object; __life?: StreetLife; __streamer?: TileStreamer }
+  interface Window { __ready?: boolean; __three?: object; __life?: StreetLife; __streamer?: TileStreamer; __transit?: Transit }
 }
 
 // Warszawa-Bulwary gauge, cm (scale since 1 Nov 2025)
@@ -65,6 +66,7 @@ let city: { gate: (x: number, z: number) => boolean; readonly complete: boolean;
 let uniforms: ReturnType<typeof makeUniforms> | null = null, streamer: TileStreamer | null = null, views: Record<string, View> = {};
 let fly: ((now: number) => void) | null = null;
 let streets: Streets | null = null;
+let transit: Transit | null = null;
 let barRect: DOMRect | null = null;
 let climate: Climate | null = null;
 let setWindows: ((hour: number, day: number) => void) | null = null;
@@ -74,7 +76,7 @@ bar.setRiver(RIVER.typical);
 bar.showRiver(false);
 new ResizeObserver(() => { barRect = null; }).observe(bar.el);
 el('div', '', `<div>adapted from <a href="https://github.com/stared/warsaw-vibe-voxel" target="_blank" rel="noopener">Warsaw in voxels</a> by <a href="https://p.migdal.pl/" target="_blank" rel="noopener">Piotr Migdał</a> & Opus 5.5</div>
-  <div>DOGAMI lidar 2014, Oregon imagery 2022 and <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap</a></div>`).id = 'credits';
+  <div>DOGAMI lidar 2014, Oregon imagery 2022, <a href="https://developer.trimet.org/" target="_blank" rel="noopener">TriMet schedules</a> and <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap</a></div>`).id = 'credits';
 if (qs.get('ui') === '0') document.body.classList.add('noui');
 addEventListener('resize', onResize);
 addEventListener('keydown', (e) => {
@@ -138,6 +140,7 @@ const focus = () => (nav.mode === 'orbit' ? controls.target : camera.position);
 function setHour(h: number) {
   daylight.apply(h);
   bar.setHour(h);
+  transit?.setClock(daylight.day, h);
 }
 
 const timesOf = (d: number) => ({ morning: Math.max(7.5, hourAt(d, 6, false)), midday: solarNoon(d), 'golden hour': hourAt(d, 5, true),
@@ -305,6 +308,14 @@ async function boot() {
     import('./streets').then((m) => m.loadStreets(scene, renderer.capabilities.getMaxAnisotropy(), city?.detail))
       .then((s) => { streets = s; }).catch((e) => console.warn('streets', e));
   }
+  // TriMet on its timetable (scripts/transit.py), on the clock; ?transit=0 leaves it off
+  if (engine === 'lod' && qs.get('transit') !== '0') {
+    import('./transit').then((m) => m.loadTransit(scene)).then((t) => {
+      transit = window.__transit = t;
+      if (city?.detail) t.fine = city.detail.fine;
+      t.setClock(daylight.day, daylight.hour);
+    }).catch((e) => console.warn('transit', e));
+  }
   if (city) labels.gate = city.gate;
   hud = new Hud(renderer.domElement, nav.mode);
   bar.search.setItems(searchItems(meta));
@@ -360,6 +371,7 @@ renderer.setAnimationLoop((now) => {
   fountains?.update(t, daylight.night);
   precip.update(t, camera.position, daylight.weather, daylight.night);
   streets?.update(camera, daylight.night);
+  transit?.update(dt, camera, daylight.night);
   if (city?.complete) document.body.classList.remove('loading');
   if (life) {
     life.group.visible = !city || city.complete;

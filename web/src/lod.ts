@@ -144,7 +144,13 @@ export function installLod({ streamer: S, meta, camera, uniforms, focus, qs }: {
 
   return {
     gate: () => true,
-    detail: { tex: detail as THREE.Texture, size: [DW * N * fine, DH * N * fine] as [number, number] },
+    detail: {
+      tex: detail as THREE.Texture, size: [DW * N * fine, DH * N * fine] as [number, number],
+      fine: (x: number, z: number) => {
+        const i = Math.floor(x / (N * fine)), j = Math.floor(z / (N * fine));
+        return i >= 0 && j >= 0 && i < DW && j < DH && detailData[j * DW + i] > 0;
+      },
+    },
     get complete() { return rootsIn === roots.length; },
   };
 }

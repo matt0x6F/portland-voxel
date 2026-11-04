@@ -1,7 +1,8 @@
 #!/bin/sh
 # Citywide build: Portland in 4096 m chunks (scripts/city_grid.py), each built by scripts/build_chunk.sh into the one
 # tile pyramid in web/public/data/tiles, JOBS at a time (default 2: a chunk peaks at ~8-9 GB, more in the West Hills,
-# on a 36 GB machine), then merged (scripts/merge_chunks.py) and the street names placed (scripts/streets.py). Chunks share one palette, merged under a lock at export.
+# on a 36 GB machine), then merged (scripts/merge_chunks.py) and the street names placed (scripts/streets.py) and
+# TriMet's timetable laid on the streets (scripts/transit.py). Chunks share one palette, merged under a lock at export.
 # A chunk with a part.json is skipped unless REBUILD=1; a failed chunk does not stop the others.
 #
 # usage: sh scripts/build_city.sh                    every chunk with any city-limits land
@@ -42,5 +43,12 @@ status=0
 printf '%s\n' $TODO | xargs -P "$JOBS" -I{} sh scripts/build_chunk.sh {} || status=$?
 uv run python scripts/merge_chunks.py
 uv run --with osmium python scripts/streets.py  # street names along the streets, over the merged city
+# TriMet's timetable (GTFS static, no key), refreshed weekly: vehicles on the streets by the clock
+G=data/raw/gtfs/trimet.zip
+mkdir -p data/raw/gtfs
+if [ ! -s $G ] || [ -n "$(find $G -mtime +7)" ]; then
+  curl -sS -L -A "portland-voxel/0.1" -o $G.part https://developer.trimet.org/schedule/gtfs.zip && mv $G.part $G
+fi
+uv run --with osmium --with pandas python scripts/transit.py
 uv run python scripts/climate.py
 [ $status -eq 0 ] || { echo "some chunks failed: see data/debug/build_c*.log"; exit $status; }

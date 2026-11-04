@@ -9,7 +9,7 @@ import { fetchJson } from './util';
 
 type Raw = { labels: [string, number, number[]][] };
 /** where the map shows fine detail (lod.ts): a mask over the city, `size` metres across */
-export interface Detail { tex: THREE.Texture; size: [number, number] }
+export interface Detail { tex: THREE.Texture; size: [number, number]; fine: (x: number, z: number) => boolean }
 
 const HEIGHT = [10, 7, 6, 5, 3.6, 3]; // cap height (m) by class: as scripts/streets.py placed them
 const PX = 64;                        // atlas em, px
