@@ -11,6 +11,7 @@ data/raw/city_grid.json and read by aoi.py when CHUNK=cx,cy is set.
 usage: uv run --with osmium python scripts/city_grid.py
 """
 import json
+import os
 import math
 from pathlib import Path
 
@@ -69,17 +70,31 @@ def main():
     oj = j0 - (GD - (j1 - j0)) / 2
     assert GW <= 32767 and GD <= 32767, (GW, GD)
     city_g = transform(lambda i, j: (i - oi, j - oj), city_ij)
+    land_g = transform(lambda x, y: (lambda i, j: (i - oi, j - oj))(*to_ij(x, y)), city)  # the limits, unbuffered
     chunks = []
     for cy in range(ncy):
         for cx in range(ncx):
             cw, cd = min(CHUNK, GW - cx * CHUNK), min(CHUNK, GD - cy * CHUNK)  # core size: edge chunks are narrower
             cell = box(cx * CHUNK, cy * CHUNK, cx * CHUNK + cw, cy * CHUNK + cd)
             share = cell.intersection(city_g).area / cell.area
+            # land: the share of city limits proper -- build_city.sh builds every chunk with any (a sliver of the
+            # city at the grid's edge is still the city); one touched only by the 150 m context buffer has none
+            land = cell.intersection(land_g).area / cell.area
             if share > 0:
-                chunks.append(dict(cx=cx, cy=cy, w=cw, d=cd, share=round(share, 3)))
+                chunks.append(dict(cx=cx, cy=cy, w=cw, d=cd, share=round(share, 3), land=round(land, 6)))
     grid = dict(epsg=EPSG, theta=theta, cx=cx0, cy=cy0, I0=-oi, J0=-oj, W=GW, D=GD, chunk=CHUNK, margin=MARGIN,
                 chunks=chunks, city_km2=round(city.area / 1e6, 1))
-    (RAW / "city_grid.json").write_text(json.dumps(grid, indent=1))
+    # built chunks are tied to this grid: a newer extract with an edited boundary would move it, and chunks built
+    # after that would no longer line up with those before (FORCE=1 when rebuilding every chunk anyway)
+    old = RAW / "city_grid.json"
+    built = list(Path("data/chunks").glob("*/part.json"))
+    if old.exists() and built and not os.environ.get("FORCE"):
+        prev = json.loads(old.read_text())
+        moved = [k for k in ("theta", "cx", "cy", "I0", "J0", "W", "D", "chunk", "margin") if prev[k] != grid[k]]
+        if moved:
+            raise SystemExit(f"the city grid would change ({', '.join(moved)}) under {len(built)} built chunks; "
+                             "keep data/raw/city_grid.json, or FORCE=1 and rebuild them all")
+    old.write_text(json.dumps(grid, indent=1))
     (RAW / "city_limits.geojson").write_text(json.dumps(dict(type="Feature", properties={}, geometry=mapping(city_g))))
     print(f"Portland: {grid['city_km2']} km2, grid {GW} x {GD} m ({ncx} x {ncy} chunks of {CHUNK} m), "
           f"{len(chunks)} chunks touch the city, theta {math.degrees(theta):.3f} deg")

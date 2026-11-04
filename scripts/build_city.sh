@@ -3,7 +3,7 @@
 # tile pyramid in web/public/data/tiles, then merged (scripts/merge_chunks.py). Chunks build one at a time (they grow
 # one shared palette, and each peaks at ~10-20 GB); a chunk with a part.json is skipped unless REBUILD=1.
 #
-# usage: sh scripts/build_city.sh                    every chunk with >= 1% of the city
+# usage: sh scripts/build_city.sh                    every chunk with any city-limits land
 #        CHUNKS="5,4 6,4" sh scripts/build_city.sh   just these
 set -e
 cd "$(dirname "$0")/.."
@@ -14,7 +14,7 @@ if [ -z "$CHUNKS" ]; then
   CHUNKS=$(uv run python -c "
 import json
 g = json.load(open('data/raw/city_grid.json'))
-print(' '.join(f\"{c['cx']},{c['cy']}\" for c in g['chunks'] if c['share'] >= 0.01))")
+print(' '.join(f\"{c['cx']},{c['cy']}\" for c in g['chunks'] if c['land'] > 0))")
 fi
 for c in $CHUNKS; do
   name="c${c%,*}_${c#*,}"
