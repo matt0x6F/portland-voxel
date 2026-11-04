@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { Meta } from './types';
-import { dataTexture, fetchGzip, fetchJson } from './util';
+import { dataTexture, dataUrl, fetchGzip, fetchJson } from './util';
 import type { VoxelUniforms } from './voxelMaterial';
 
 interface Phase { day: number; sd: number; n: number }
@@ -10,7 +10,7 @@ interface Phenology { classes: Record<string, Class>; city: { leaf: number; colo
 export const FOLIAGE_CLASSES = 16;
 
 export async function loadFoliage(meta: Meta, U: VoxelUniforms) {
-  const [ph, buf] = await Promise.all([fetchJson<Phenology>('data/phenology.json'), fetchGzip('data/foliage.bin')]);
+  const [ph, buf] = await Promise.all([fetchJson<Phenology>(dataUrl('phenology.json')), fetchGzip(dataUrl('foliage.bin'))]);
   const w = meta.W >> 1, h = meta.D >> 1, a = new Uint8Array(buf), rg = new Uint8Array(w * h * 2);
   for (let i = 0; i < w * h; i++) { rg[2 * i] = a[i]; rg[2 * i + 1] = a[w * h + i]; }
   const tex = dataTexture(rg, w, h, THREE.RGFormat);

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { fetchJson } from './util';
+import { dataUrl, fetchJson } from './util';
 
 // Street names painted on the streets, as a map prints them (placed by scripts/streets.py: where each label goes and
 // the stretch of centreline it lies on, with the ground's height along it). Every letter is a quad flat on the road,
@@ -201,7 +201,7 @@ export class Streets {
 }
 
 export async function loadStreets(scene: THREE.Scene, aniso: number, detail?: Detail) {
-  const raw = await fetchJson<Raw>('data/streets.json');
+  const raw = await fetchJson<Raw>(dataUrl('streets.json'));
   await document.fonts?.load(FONT);
   return new Streets(raw, scene, aniso, detail);
 }

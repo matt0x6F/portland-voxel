@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { FloodInfo, Meta } from './types';
 import type { VoxelUniforms } from './voxelMaterial';
-import { dataTexture, fetchGzip, fetchJson } from './util';
+import { dataTexture, dataUrl, fetchGzip, fetchJson } from './util';
 
 // The Vistula's level (scripts/flood.py). The voxels hold the river as on the LiDAR day. Above that, one sheet of water
 // covers every cell the river reaches at that level (an embankment keeps the land behind it dry until topped), sloping
@@ -16,7 +16,7 @@ export class Flood {
   constructor(private readonly scene: THREE.Scene, private readonly U: VoxelUniforms, private readonly meta: Meta) {}
 
   async load() {
-    const [info, buf] = await Promise.all([fetchJson<FloodInfo>('data/flood.json'), fetchGzip('data/flood.bin')]);
+    const [info, buf] = await Promise.all([fetchJson<FloodInfo>(dataUrl('flood.json')), fetchGzip(dataUrl('flood.bin'))]);
     const { W, D } = this.meta, n = W * D, a = new Uint8Array(buf), rg = new Uint8Array(n * 2);
     for (let i = 0; i < n; i++) { rg[2 * i] = a[i]; rg[2 * i + 1] = a[n + i]; }
     const tex = dataTexture(rg, W, D, THREE.RGFormat);

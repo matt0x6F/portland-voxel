@@ -1,3 +1,18 @@
+# Portland in voxels
+
+All of Portland, Oregon (374 km², the West Hills to East Portland past I-205) at 1 m voxels, adapted from Piotr
+Migdał's [Warsaw in voxels](https://p.migdal.pl/warsaw-vibe-voxel/) (MIT; his README follows below). East Portland,
+so often left out, is built at the same fidelity as downtown, greenery included.
+
+- **Data:** DOGAMI/OLC Metro 2014 lidar (NOAA Entwine), Oregon's 2022 orthophoto (OSIP), OpenStreetMap, TriMet's GTFS.
+- **Build:** `sh scripts/build_city.sh` builds the city in 4 km chunks into one tile pyramid (hours; ~9 GB of RAM per
+  chunk), places the street names (`scripts/streets.py`) and lays TriMet's timetable on the streets
+  (`scripts/transit.py`). The viewer streams it by distance (`web/src/lod.ts`).
+- **Live:** Portland's clock: the sun, the lights and every MAX train, streetcar and bus where the timetable puts it.
+- **Deploy:** the app on a Cloudflare Worker, the ~1.1 GB of tiles in R2 (`scripts/deploy_site.sh`).
+
+---
+
 # Warszawa Śródmieście in voxels
 
 A 3950 × 3150 m diorama of central Warsaw at 1 m voxels, anchored on the PKiN spire and rotated 21.5° to the Palace axes (so walls and the street grid are not staircased), in the style of MagicaVoxel renders (ephtracy). It covers:

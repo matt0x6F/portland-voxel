@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { Meta } from './types';
-import { dataTexture, fetchGzip, fetchJson } from './util';
+import { dataTexture, dataUrl, fetchGzip, fetchJson } from './util';
 import type { VoxelUniforms } from './voxelMaterial';
 
 interface WinType { med: { weekday: number[]; weekend: number[] }; shape: number[]; floors: number; colour: [number, number, number] }
@@ -11,7 +11,7 @@ const KIND_MODEL = ['residential', 'residential', 'office', 'hotel', 'office', '
 const CENTRES = [16.5, 18.5, 20.5, 22.5, 27];
 
 export async function loadWindows(meta: Meta, U: VoxelUniforms) {
-  const [stats, buf] = await Promise.all([fetchJson<WinStats>('data/windows.json'), fetchGzip('data/windows.bin')]);
+  const [stats, buf] = await Promise.all([fetchJson<WinStats>(dataUrl('windows.json')), fetchGzip(dataUrl('windows.bin'))]);
   const tex = dataTexture(new Uint8Array(buf), meta.W, meta.D, THREE.RedFormat);
   tex.magFilter = tex.minFilter = THREE.NearestFilter;
   U.uWinMap.value = tex;

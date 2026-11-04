@@ -27,6 +27,11 @@ export async function fetchGzip(url: string): Promise<ArrayBuffer> {
 
 export const fetchJson = <T>(url: string): Promise<T> => fetch(url).then((r) => r.json() as Promise<T>);
 
+// where the map's data lives: data/ beside the page (dev, and any single-folder host), or a separate origin set at
+// build time (VITE_DATA_URL, e.g. the R2 bucket the deployed site reads its 1 GB of tiles from)
+const DATA = new URL((import.meta.env.VITE_DATA_URL as string | undefined)?.replace(/\/?$/, '/') ?? 'data/', location.href);
+export const dataUrl = (path: string) => new URL(path, DATA).href;
+
 export function dataTexture(data: Uint8Array | Uint16Array, w: number, h: number, format: THREE.PixelFormat,
   type: THREE.TextureDataType = THREE.UnsignedByteType) {
   const t = new THREE.DataTexture(data, w, h, format, type);

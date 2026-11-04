@@ -78,7 +78,7 @@ export class Bar {
     onRiver: (cm: number) => void;
   }) {
     this.el.id = 'bar';
-    this.search = new PlaceSearch(this.el, 'Search East Portland…');
+    this.search = new PlaceSearch(this.el, 'Search Portland…');
     this.date = new Slider(this.el, { min: 1, max: 365, step: 1, marks: days, near: 3, log: false, show: dayMonth, onInput: onDay, onChange: onDayEnd });
     // the whole day: the clock follows Portland's live time (main.ts), small hours included
     this.time = new Slider(this.el, { min: 0, max: 24 - 1 / 60, step: 1 / 60, marks: {}, near: 1 / 3, log: false, show: hhmm, onInput: onHour });

@@ -3,6 +3,8 @@
 __pycache__/
 web/node_modules/
 web/dist/
+.wrangler/
+web/.wrangler/
 
 # built per city by scripts/build_portland.sh
 web/public/data/

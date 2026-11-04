@@ -20,7 +20,7 @@ import type { Kind, TrafficData } from './sim/types';
 import { TileStreamer } from './stream';
 import type { Facts, Label, Meta, Place, View } from './types';
 import { dateOf, dayOfYear, hourAt, portlandNow, solarNoon } from './sun';
-import { $, coarsePointer, ease, el, fetchJson, lerp } from './util';
+import { $, coarsePointer, dataUrl, ease, el, fetchJson, lerp } from './util';
 import { pkinLight } from './sky';
 import { type Climate, Precip, typical, type Weather, WEATHERS } from './weather';
 import type { World } from './world';
@@ -247,9 +247,12 @@ function searchItems(meta: Meta): SearchItem[] {
   return [
     ...Object.values(meta.views).map((v) => ({ name: v.label, kind: 'viewpoint', featured: true, go: () => goView(v) })),
     ...meta.labels.map((l) => ({ name: l.name, alt: [l.en, l.alt].join(' '), kind: l.kind, go: () => goPlace(l.x, l.y, Math.max(40, (l.R ?? 20) * 1.4), null, l.name) })),
-    { name: 'Follow a tram', alt: 'tramwaj tram ride follow jedź', kind: 'action', go: () => followNearest('tram') },
-    { name: 'Follow a car', alt: 'samochód car bus autobus ride follow jedź', kind: 'action', go: () => followNearest('car') },
-    { name: 'Follow someone', alt: 'person people pieszy przechodzień idź walk with follow', kind: 'action', go: () => followNearest('person') },
+    // street life (sim/life.ts) runs on a district map only: the citywide map has no one to follow yet
+    ...(engine === 'lod' ? [] : [
+      { name: 'Follow a tram', alt: 'tramwaj tram ride follow jedź', kind: 'action', go: () => followNearest('tram') },
+      { name: 'Follow a car', alt: 'samochód car bus autobus ride follow jedź', kind: 'action', go: () => followNearest('car') },
+      { name: 'Follow someone', alt: 'person people pieszy przechodzień idź walk with follow', kind: 'action', go: () => followNearest('person') },
+    ]),
   ];
 }
 
@@ -265,7 +268,7 @@ function keepInside() {
 
 async function boot() {
   let meta: Meta;
-  [meta, climate] = await Promise.all([fetchJson<Meta>('data/meta.json'), fetchJson<Climate>('data/climate.json')]);
+  [meta, climate] = await Promise.all([fetchJson<Meta>(dataUrl('meta.json')), fetchJson<Climate>(dataUrl('climate.json'))]);
   views = meta.views;
   if (meta.chunks) {
     // the citywide map: streamed by distance, and seen from far enough to need a longer view than one district
@@ -325,12 +328,12 @@ async function boot() {
   if (city) labels.gate = city.gate;
   hud = new Hud(renderer.domElement, nav.mode);
   bar.search.setItems(searchItems(meta));
-  fetchJson<{ places: Place[] }>('data/places.json').then(({ places }) => bar.search.setItems([...searchItems(meta),
+  fetchJson<{ places: Place[] }>(dataUrl('places.json')).then(({ places }) => bar.search.setItems([...searchItems(meta),
     ...places.map(([name, kind, x, y, size, alt]) => ({ name, alt, kind, go: () => goPlace(x, y, size, { name, kind }) }))]));
   fountains = new Fountains(scene, meta.jets ?? []);
   flood = new Flood(scene, uniforms, meta);
   flood.load().then(() => { bar.river.input.disabled = false; flood!.setGauge(RIVER.typical); }).catch((e) => console.warn('flood', e));
-  fetchJson<TrafficData>('data/traffic.json').then((td) => {
+  fetchJson<TrafficData>(dataUrl('traffic.json')).then((td) => {
     life = nav.life = new StreetLife(scene, td);
     life.world = world;
     window.__life = life;

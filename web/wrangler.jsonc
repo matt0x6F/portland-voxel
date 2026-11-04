@@ -1,0 +1,9 @@
+{
+  // The app only (index.html, the scripts, preview.jpg): the map's data is in R2 on its own domain
+  // (scripts/deploy_site.sh, VITE_DATA_URL). Deploy with `sh scripts/deploy_site.sh app`.
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "portland-voxel",
+  "compatibility_date": "2026-11-01",
+  "assets": { "directory": "./dist" },
+  "routes": [{ "pattern": "SITE_DOMAIN", "custom_domain": true }]
+}

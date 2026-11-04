@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { fetchJson, hash } from './util';
+import { dataUrl, fetchJson, hash } from './util';
 
 // TriMet on its timetable (scripts/transit.py): every MAX train, streetcar, bus and aerial tram cabin where the
 // published schedule puts it, at Portland's time. A block (one vehicle's day, its trips back to back) is one vehicle:
@@ -142,7 +142,7 @@ export class Transit {
     const b = this.days.get(file);
     if (b === undefined) {
       this.days.set(file, 'loading');
-      fetchJson<DayData>(`data/transit/${file}.json`).then((d) => this.days.set(file, decodeDay(d, this.routes)))
+      fetchJson<DayData>(dataUrl(`transit/${file}.json`)).then((d) => this.days.set(file, decodeDay(d, this.routes)))
         .catch((e) => { console.warn('transit', file, e); this.days.delete(file); });
       return null;
     }
@@ -251,6 +251,6 @@ export class Transit {
 }
 
 export async function loadTransit(scene: THREE.Scene) {
-  const [net, index] = await Promise.all([fetchJson<Net>('data/transit/net.json'), fetchJson<Index>('data/transit/index.json')]);
+  const [net, index] = await Promise.all([fetchJson<Net>(dataUrl('transit/net.json')), fetchJson<Index>(dataUrl('transit/index.json'))]);
   return new Transit(net, index, scene);
 }

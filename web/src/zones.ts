@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Effect, EffectAttribute, EffectPass, type EffectComposer, type Pass } from 'postprocessing';
 import type { TileStreamer } from './stream';
 import type { Meta, Zones } from './types';
-import { dataTexture, fetchGzip, fetchJson } from './util';
+import { dataTexture, dataUrl, fetchGzip, fetchJson } from './util';
 import { makeVoxelMaterial, type VoxelUniforms, type ZoneUniforms } from './voxelMaterial';
 
 // The real 1 m city in a shape around the focus, clay elsewhere (phones: the whole city at 1 m needs ~1 GB of GPU).
@@ -80,7 +80,7 @@ export async function installZones({ streamer: S, uniforms: U, meta, focus, qs, 
 }) {
   const mode = MODES[qs.get('shape') ?? ''] ?? 4, R = +(qs.get('r') ?? 250), budget = +(qs.get('budget') ?? 2) * 1e6;
   const { W, D } = meta;
-  const [zbuf, zones] = await Promise.all([fetchGzip('data/zones.bin'), fetchJson<Zones>('data/zones.json')]);
+  const [zbuf, zones] = await Promise.all([fetchGzip(dataUrl('zones.bin')), fetchJson<Zones>(dataUrl('zones.json'))]);
   const blkIds = new Uint16Array(zbuf, 0, W * D), bldIds = new Uint16Array(zbuf, W * D * 2, W * D);
   const ids = (a: Uint16Array) => { const t = dataTexture(a, W, D, THREE.RedIntegerFormat, THREE.UnsignedShortType); t.internalFormat = 'R16UI'; return t; };
   const flags = (n: number, w: number) => dataTexture(new Uint8Array(w * Math.ceil((n + 1) / w)), w, Math.ceil((n + 1) / w), THREE.RedFormat);
