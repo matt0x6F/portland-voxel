@@ -69,6 +69,12 @@ else:
     D = int(round(math.hypot(_h1[0] - _h0[0], _h1[1] - _h0[1])))
     I0, J0 = W // 2, D // 2  # grid position of the centre
 
+# per-AOI working files, so chunks can build side by side (scripts/build_city.sh JOBS=n)
+OSM_FILE = f"{RAW}/osm_{NAME}.json"
+PREP_FILE = f"data/prep_{NAME}.npz"
+GROUND_FILE = f"data/ground_{NAME}.npz"
+DEBUG_DIR = f"data/debug/{NAME}"
+
 EU = np.array([math.cos(THETA), math.sin(THETA)])   # grid +i in world
 EV = np.array([math.sin(THETA), -math.cos(THETA)])  # grid +j in world
 

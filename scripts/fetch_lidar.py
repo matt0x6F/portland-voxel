@@ -54,8 +54,9 @@ def get(rel, binary=True):
             try:
                 r = S.get(f"{BASE}/{rel}", headers=UA, timeout=120)
                 r.raise_for_status()
-                p.with_suffix(".part").write_bytes(r.content)
-                p.with_suffix(".part").rename(p)
+                part = p.with_name(f"{p.name}.{os.getpid()}.part")  # chunks building side by side share the cache
+                part.write_bytes(r.content)
+                part.rename(p)
                 break
             except requests.RequestException as e:
                 if k == 4:

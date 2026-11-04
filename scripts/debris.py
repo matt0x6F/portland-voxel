@@ -5,6 +5,8 @@ from pathlib import Path
 import numpy as np
 from scipy import ndimage
 
+DBG = Path("data/debug")  # voxelize.py points this at its own AOI / chunk folder
+
 
 def drop_debris(vol, g, keep_ids, note, max_size=100, B=256, M=24, box=None):  # the stadium hub (135) stays
     """Delete small clumps of voxels that touch neither the ground nor anything that does (LiDAR returns off cranes,
@@ -51,8 +53,8 @@ def drop_debris(vol, g, keep_ids, note, max_size=100, B=256, M=24, box=None):  #
                 n += 1; nv += len(zi)
     note(f"floating debris removed: {n} clumps, {nv} voxels; {len(big)} bigger floating clumps listed")
     if box is None:
-        Path("data/debug").mkdir(parents=True, exist_ok=True)
-        json.dump(sorted(big, key=lambda b: -b["n"]), open("data/debug/floating.json", "w"))
+        DBG.mkdir(parents=True, exist_ok=True)
+        json.dump(sorted(big, key=lambda b: -b["n"]), open(DBG / "floating.json", "w"))
 
 
 LOG = []  # every fill and set of posts the support pass made (data/debug/supports.json)
@@ -202,6 +204,6 @@ def support_floating(vol, g, pal, bkind, note, trunk_id, post_id, trunk_ok=None,
         return support_floating(vol, g, pal, bkind, note, trunk_id, post_id, trunk_ok, B, _noleaf=False)
     note(f"floating: {len(stats)} components; removed {n_drop} voxels; {n_trunk} crowns given a trunk; building pieces: "
          f"{n_fill} columns filled down inside outlines, {n_post} posts; {len(left)} left (listed)")
-    Path("data/debug").mkdir(parents=True, exist_ok=True)
-    json.dump(sorted(left, key=lambda x: -x["n"]), open("data/debug/floating_left.json", "w"))
-    json.dump(LOG, open("data/debug/supports.json", "w"))
+    DBG.mkdir(parents=True, exist_ok=True)
+    json.dump(sorted(left, key=lambda x: -x["n"]), open(DBG / "floating_left.json", "w"))
+    json.dump(LOG, open(DBG / "supports.json", "w"))

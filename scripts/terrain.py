@@ -12,8 +12,10 @@ from pathlib import Path
 import numpy as np
 from scipy import ndimage
 
+from aoi import GROUND_FILE
+
 STEP = 4
-z = np.load("data/ground.npz")
+z = np.load(GROUND_FILE)
 g = z["g"].astype(np.float32)
 # each vertex: the mean over the 4 m around it, so roads and squares stay, the 1 m terraces don't
 h = np.round(ndimage.uniform_filter(g, STEP)[::STEP, ::STEP] * 10).astype(np.uint16)

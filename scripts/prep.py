@@ -12,7 +12,7 @@ from rasterio.merge import merge
 from rasterio.windows import from_bounds
 from scipy import ndimage
 
-from aoi import D, NAME, RAW, W, to_world, world_bounds
+from aoi import D, NAME, PREP_FILE, RAW, W, to_world, world_bounds
 
 MINX, MINY, MAXX, MAXY = (round(v) for v in world_bounds(margin=10))
 BOUNDS = (MINX, MINY, MAXX, MAXY)
@@ -77,6 +77,6 @@ for n, a in (("dsm", dsm), ("dtm", dtm)):
     print(n, a.shape, float(a[a > -1000].min()), float(a.max()), int((a < -1000).sum()), "nodata")
 orto = resample(mosaic_rgb(f"orto_{NAME}_*.tif", 0.2), 0.2, 0.2, order=1)
 print("orto", orto.shape, orto.reshape(-1, 3).mean(0), int((orto.sum(-1) == 0).sum()), "empty px")
-np.savez_compressed("data/prep.npz", dsm=dsm, dtm=dtm, orto=orto)
+np.savez_compressed(PREP_FILE, dsm=dsm, dtm=dtm, orto=orto)
 from PIL import Image
 Image.fromarray(orto[::4, ::4]).save("data/orto_preview.jpg", quality=85)

@@ -22,7 +22,7 @@ from shapely.geometry import LineString, Point
 from shapely.ops import substring
 from shapely.strtree import STRtree
 
-from aoi import CHUNK_INFO, CX, CY, D, EPSG, NAME, THETA, W
+from aoi import CHUNK_INFO, CX, CY, D, DEBUG_DIR, EPSG, GROUND_FILE, NAME, PREP_FILE, THETA, W
 from osm import OSM
 
 # Chunk mode (CHUNK=cx,cy, scripts/aoi.py): one piece of the citywide map. Its tiles go straight into the city's
@@ -43,7 +43,7 @@ else:
     import landmarks
 
 OUT = Path("web/public/data")
-DBG = Path("data/debug")
+DBG = Path(DEBUG_DIR)  # per AOI / chunk: chunks build side by side
 OUT.mkdir(parents=True, exist_ok=True)
 DBG.mkdir(parents=True, exist_ok=True)
 report = {"notes": []}
@@ -126,7 +126,7 @@ def stable_hash(*a):
     return int(hashlib.md5("/".join(map(str, a)).encode()).hexdigest()[:8], 16)
 
 
-pal = Palette(json.load(open(PALETTE_FILE)) if CHUNK_INFO and PALETTE_FILE.exists() else None)
+pal = Palette()  # chunk mode: this chunk's own, merged into the city's at export (under a lock, see there)
 C = {  # ground & misc palette (MagicaVoxel-like pastel)
     "paving": pal("#c6c2b8"), "paving2": pal("#b5b4af"), "asphalt": pal("#5f636b"), "asphalt_l": pal("#6e7178"),
     "sett": pal("#8f8981"), "concrete": pal("#bdbab2"), "cycle": pal("#8a5a52"), "gravel": pal("#d8ccb5"),
@@ -150,7 +150,7 @@ WALL_DEFAULTS = ["#d8cfc0", "#cbbfa8", "#e2d6bf", "#c4bbad", "#d9c7a7", "#cdc6ba
                  "#d3c3b0", "#c9c9c2"]
 
 # ---------------------------------------------------------------- rasters
-z = np.load("data/prep.npz")
+z = np.load(PREP_FILE)
 dsm, dtm, orto = z["dsm"], z["dtm"], z["orto"]
 d4 = dsm.reshape(D, 2, W, 2)
 dsm_max = d4.max((1, 3))
@@ -974,7 +974,7 @@ for f in _thin:
         f["wall"] = best["wall"]
         n_thin += 1
 note("thin parts given their neighbour's wall:", n_thin, "of", len(_thin))
-json.dump(THIN_LOG, open("data/debug/thin_parts.json", "w"))
+json.dump(THIN_LOG, open(DBG / "thin_parts.json", "w"))
 
 note("OSM roof colours overruled by the ortho:", len(ROOF_OVERRULED), ROOF_OVERRULED[:8])
 # the tallest a tree may be: ~30 m in central Warsaw; East Portland's Douglas firs (Powell Butte) reach 55-60 m
@@ -1357,7 +1357,7 @@ json.dump(dict(sources={"city": "Baza Obiektów Zieleni, mapa.um.warszawa.pl (Zi
                fields=dict(x="grid column", y="grid row", z="ground voxel", h="LiDAR crown top above ground, m",
                            sp="species (Latin)", pl="species (Polish)", cm="trunk circumference, cm",
                            drawn="lidar | procedural | none"), trees=_tr),
-          open(Path(OUT) / "trees.json", "w"), ensure_ascii=False, separators=(",", ":"))
+          open((DBG if CHUNK_INFO else Path(OUT)) / "trees.json", "w"), ensure_ascii=False, separators=(",", ":"))
 
 # ---------------------------------------------------------------- fountains (visual_ref.md, Commons photos Aug 2026)
 # Flat walk-on fountain on the filled-in Marszałkowska tunnel ramp: dark speckled granite cut into irregular
@@ -1850,6 +1850,7 @@ labels_mod.radii(labels, g, g + np.where(bmask, topi, 0))
 
 # ---------------------------------------------------------------- floating debris
 import debris
+debris.DBG = DBG
 debris.drop_debris(vol, g, np.array([i for i, e in enumerate(pal.entries) if e[3] == M_LEAF] + [C["trunk"]], dtype=vol.dtype), note)
 
 # ---------------------------------------------------------------- export
@@ -1860,7 +1861,7 @@ note("final height", Hm, "palette", len(pal.entries))
 _ids = vol[g - 1, np.arange(D)[:, None], np.arange(W)[None, :]]
 _lut = np.array([e[:3] for e in pal.entries], np.uint8)
 _lut[[i for i, e in enumerate(pal.entries) if e[3] == M_GRASS]] = _lut[C["bare"]]
-np.savez_compressed("data/ground.npz", g=g.astype(np.int16), rgb=_lut[_ids],
+np.savez_compressed(GROUND_FILE, g=g.astype(np.int16), rgb=_lut[_ids],
                     b=np.where(bmask, topi, 0).astype(np.int16))  # building height above ground (photo-pose tools)
 import tiles
 EXPORT_IDS = dict(keep_ids={i for i, e in enumerate(pal.entries) if e[3] == M_LAMP},
@@ -1874,6 +1875,34 @@ if os.environ.get("FINALDUMP"):  # the finished volume, for whole-city checks (s
     np.save("data/cache/final_vol.npy", vol)
     np.save("data/cache/final_g.npy", g)
 if CHUNK_INFO:
+    # into the city's palette: under an exclusive lock (chunks build side by side), each colour of this chunk's own
+    # palette gets the city index it already has, or a new one appended; the volume is remapped slab by slab (one
+    # z-layer at a time: a second whole volume would double the peak), and the export ids recomputed in city indices
+    import fcntl
+    CHUNKS.mkdir(parents=True, exist_ok=True)
+    with open(CHUNKS / "palette.lock", "w") as _lk:
+        fcntl.flock(_lk, fcntl.LOCK_EX)
+        city_pal = Palette(json.load(open(PALETTE_FILE)) if PALETTE_FILE.exists() else None)
+        n_before = len(city_pal.entries)
+        _lut = np.zeros(max(len(pal.entries), 1), np.uint16)
+        for i, e in enumerate(pal.entries):
+            if i:
+                _lut[i] = city_pal(e[:3], e[3], q=1)  # already quantised: q=1 keeps the colour as it is
+        _tmp = PALETTE_FILE.with_name(f"palette.{os.getpid()}.json")
+        json.dump([list(e) for e in city_pal.entries], open(_tmp, "w"))
+        os.replace(_tmp, PALETTE_FILE)
+        fcntl.flock(_lk, fcntl.LOCK_UN)
+    assert len(city_pal.entries) <= 4096, "the viewer's palette texture holds 4096 colours (voxelMaterial.ts)"
+    for _z in range(vol.shape[0]):
+        vol[_z] = _lut[vol[_z]]
+    C = {k: int(_lut[v]) for k, v in C.items()}
+    pal = city_pal
+    EXPORT_IDS = dict(keep_ids={i for i, e in enumerate(pal.entries) if e[3] == M_LAMP},
+                      skip_ids={i for i, e in enumerate(pal.entries) if e[3] == M_LEAF} | {C["trunk"]},
+                      face_ids={i for i, e in enumerate(pal.entries) if e[3] == M_CLOCK},
+                      fol_ids={i for i, e in enumerate(pal.entries) if e[3] == M_LEAF} | {C["trunk"]},
+                      grass_ids={i for i, e in enumerate(pal.entries) if e[3] == M_GRASS}, bare_id=C["bare"])
+    note(f"chunk {NAME}: {len(_lut) - 1} colours into the city palette ({n_before} -> {len(pal.entries)})")
     _ci = CHUNK_INFO
     tile_info = tiles.export_chunk(vol, g, OUT / "tiles", _ci["core"], (_ci["cy"] * _ci["chunk"], _ci["cx"] * _ci["chunk"]),
                                    DZ, note, **EXPORT_IDS)
@@ -1921,8 +1950,7 @@ if CHUNK_INFO:
         ground=[int(np.percentile(g[_r0:_r0 + _nr, _c0:_c0 + _nc], q)) + DZ for q in (5, 50, 95)],
     )
     (CHUNKS / NAME).mkdir(parents=True, exist_ok=True)
-    json.dump(part, open(CHUNKS / NAME / "part.json", "w"), separators=(",", ":"))
-    json.dump([list(e) for e in pal.entries], open(PALETTE_FILE, "w"))
+    json.dump(part, open(CHUNKS / NAME / "part.json", "w"), separators=(",", ":"))  # (the palette was saved at export)
     json.dump(report, open(CHUNKS / NAME / "report.json", "w"), indent=1, ensure_ascii=False)
     note(f"chunk {NAME}: part.json written; palette now {len(pal.entries)} entries")
     print("done")

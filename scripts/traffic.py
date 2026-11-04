@@ -15,7 +15,7 @@ import numpy as np
 from pyproj import Transformer
 from scipy.ndimage import maximum_filter1d
 
-from aoi import D, EPSG, RAW, W, to_grid
+from aoi import D, EPSG, OSM_FILE, RAW, W, to_grid
 
 DRIVE = {"motorway": 22, "trunk": 16, "primary": 14, "secondary": 13.9, "tertiary": 12.5, "unclassified": 11,
          "residential": 9, "motorway_link": 14, "trunk_link": 12, "primary_link": 11, "secondary_link": 11,
@@ -83,7 +83,7 @@ def build(g, nd_mean, note, surf=None, water=None, vol=None, solid=None):
     nd_mean: height of the walking/driving surface above the ground where it is a bridge deck (voxelize.py passes the
     deck height: the lowest LiDAR return around, not the cars or cable stays the 2025 flight caught on it).
     vol, solid: the finished volume and which palette ids bear weight; every path is then fitted to it (fit)."""
-    data = json.load(open(f"{RAW}/osm.json"))
+    data = json.load(open(OSM_FILE))
     # nodes of any bridge way (road, path, tram, rail): drawn on the deck, so agents there move at deck height
     bridge_nodes = {n for e in data["elements"] if e["type"] == "way" and e.get("tags", {}).get("bridge") not in (None, "no")
                     for n in e.get("nodes", [])}
