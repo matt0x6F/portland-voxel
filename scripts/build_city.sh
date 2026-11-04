@@ -14,10 +14,16 @@ JOBS=${JOBS:-2}
 mkdir -p data/raw data/debug data/cache data/chunks web/public/data
 [ -s data/raw/city_grid.json ] || uv run --with osmium python scripts/city_grid.py
 if [ -z "$CHUNKS" ]; then
-  CHUNKS=$(uv run python -c "
-import json
+  # west and east alternate in the queue, so a tall West Hills chunk (the river to Council Crest, plus 60 m firs:
+  # ~2x the volume of a flat one) runs beside a flat eastern one rather than another hill
+  # (built ones are left out first, so the pairs stay west + east)
+  CHUNKS=$(REBUILD=$REBUILD uv run python -c "
+import json, os
 g = json.load(open('data/raw/city_grid.json'))
-print(' '.join(f\"{c['cx']},{c['cy']}\" for c in g['chunks'] if c['land'] > 0))")
+done = lambda c: not os.environ.get('REBUILD') and os.path.exists(f\"data/chunks/c{c['cx']}_{c['cy']}/part.json\")
+cs = sorted((c for c in g['chunks'] if c['land'] > 0 and not done(c)), key=lambda c: (c['cx'], c['cy']))
+order = [cs[i // 2] if i % 2 == 0 else cs[-1 - i // 2] for i in range(len(cs))]
+print(' '.join(f\"{c['cx']},{c['cy']}\" for c in order))")
 fi
 # the Oregon extract: refreshed once here, not by chunks racing each other
 P=data/raw/geofabrik/oregon-latest.osm.pbf
